@@ -19,7 +19,24 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
 # Pode precisar importar XGBoost se o usaste e guardaste
 # import xgboost as xgb
+import subprocess
+import sys
 
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError:
+    st.error("A biblioteca matplotlib não está instalada. Tentando instalá-la...")
+    try:
+        # Executa o comando pip install no mesmo ambiente Python
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "matplotlib"])
+        st.success("matplotlib instalado com sucesso! Por favor, reinicia a aplicação.")
+        st.stop() # Tenta parar a app para que seja reiniciada e o import funcione
+    except:
+        st.error("Erro ao instalar matplotlib. Por favor, instala manualmente no terminal: pip install matplotlib")
+    st.stop() # Para a execução se a instalação falhar ou for bem-sucedida (requer restart)
+
+# Repetir para seaborn, scikit-learn, etc.
+# ... resto do código Streamlit
 # --- Configuração da Página ---
 st.set_page_config(
     page_title="Student Intervention System",
