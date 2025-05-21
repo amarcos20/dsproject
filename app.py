@@ -1,113 +1,86 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import joblib
-import io # Importar io para capturar output de data.info()
-import os
-# Importar métricas e utilitários adicionais de sklearn necessários para as secções Modelos e Previsão
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, classification_report
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score # Importar para referência, não usados diretamente na app
-from sklearn.preprocessing import MinMaxScaler, OneHotEncoder # Importar para referência no preprocessor
-from sklearn.compose import ColumnTransformer # Importar para referência no preprocessor
-# Importar modelos usados, se necessário para a interface de seleção ou referência
+#import matplotlib.pyplot as plt # Removido, usando Plotly para interactividade
+import seaborn as sns # Mantido para paletas de cores se necessário, mas Plotly é o foco
+# Removido: Não precisamos de importar os modelos e split/metrics do sklearn diretamente para TREINAR na carga
+# from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, roc_auc_score
+from sklearn.metrics import ConfusionMatrixDisplay # Para plotar CM no streamlit, se quiser substituir Plotly
+# Importar os tipos de modelos necessários para a secção Análise de Matriz (treino temporário)
 from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neighbors import KNeighborsClassifier # Adicionado KNN, estava no seu notebook
 from sklearn.svm import SVC
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
-# Pode precisar importar XGBoost se o usaste e guardaste
-# import xgboost as xgb
-import subprocess
-import sys
+from sklearn.tree import DecisionTreeClassifier # Adicionado Decision Tree, estava no seu notebook
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier # Adicionados Ensembles
 
-try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    st.error("A biblioteca matplotlib não está instalada. Tentando instalá-la...")
-    try:
-        # Executa o comando pip install no mesmo ambiente Python
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "matplotlib"])
-        st.success("matplotlib instalado com sucesso! Por favor, reinicia a aplicação.")
-        st.stop() # Tenta parar a app para que seja reiniciada e o import funcione
-    except:
-        st.error("Erro ao instalar matplotlib. Por favor, instala manualmente no terminal: pip install matplotlib")
-    st.stop() # Para a execução se a instalação falhar ou for bem-sucedida (requer restart)
+import time
+import plotly.express as px
+import plotly.graph_objects as go
+from streamlit_option_menu import option_menu
 
-# Repetir para seaborn, scikit-learn, etc.
-# ... resto do código Streamlit
+# Novo: Importar joblib e os para carregar artefactos e gerir caminhos
+import joblib
+import os
+
 # --- Configuração da Página ---
 st.set_page_config(
-    page_title="Student Intervention System",
-    page_icon="📚",
+    page_title="Sistema de Intervenção Estudantil", # Ajustado o título
+    page_icon="📊",
     layout="wide", # Use wide layout for better use of space
     initial_sidebar_state="expanded"
 )
 
 # --- Estilo CSS Personalizado ---
+# Mantido e ligeiramente ajustado para consistência
 st.markdown("""
 <style>
+    /* Headers */
     .main-header {
         font-size: 2.8rem; /* Increased size */
-        color: #3366FF;
+        color: #1A237E; /* Darker Blue */
         text-align: center;
         margin-bottom: 1.5rem; /* Increased margin */
         font-weight: bold;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
     }
     .sub-header {
         font-size: 2rem; /* Increased size */
-        color: #4682B4; /* SteelBlue */
+        color: #283593; /* Slightly lighter */
         margin-top: 2rem;
         margin-bottom: 1rem;
         font-weight: bold;
-        border-bottom: 2px solid #4682B4; /* Add a line */
+        border-bottom: 2px solid #C5CAE9; /* Light underline */
         padding-bottom: 0.5rem;
     }
-    .metric-card {
-        background-color: #eef2f7; /* Light blue background */
-        border-left: 5px solid #3366FF; /* Blue border */
-        border-radius: 5px;
-        padding: 1.5rem; /* Increased padding */
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Softer shadow */
+    .info-text {
+        font-size: 1rem;
+        color: #424242;
         margin-bottom: 1rem;
+        line-height: 1.6; /* Improved readability */
     }
-     /* Style for st.metric value */
-    .stMetric > div > div > div > div:first-child {
-        font-size: 1.2rem;
-        color: #3366FF;
+    /* Cards */
+    .metric-card {
+        background-color: #E8EAF6; /* Very light blue */
+        border-left: 6px solid #3F51B5; /* Indigo border */
+        border-radius: 10px; /* More rounded corners */
+        padding: 1.5rem;
+        margin-bottom: 1.5rem; /* Increased margin */
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15); /* Stronger shadow */
     }
-     /* Style for st.metric label */
-    .stMetric > div > div > div > div:last-child {
-         font-size: 0.9rem;
-         color: #555;
+     /* Style for st.metric value - Streamlit's built-in metric uses different classes */
+    div[data-testid="stMetric"] label div { /* Targeting the label div in st.metric */
+        font-size: 1rem !important; /* Adjust label size */
+        color: #555 !important;
     }
-    .prediction-card {
-        padding: 2rem; /* Increased padding */
-        border-radius: 10px;
-        margin-top: 2rem; /* Increased margin */
-        text-align: center;
-        font-size: 1.5rem;
-        font-weight: bold;
-    }
-    .prediction-pass {
-        background-color: #e8f5e9; /* Light green */
-        border: 2px solid #4CAF50; /* Green */
-        color: #2E7D32; /* Dark green text */
-    }
-    .prediction-fail {
-        background-color: #ffebee; /* Light red */
-        border: 2px solid #F44336; /* Red */
-        color: #D32F2F; /* Dark red text */
-    }
-    .feature-importance-bar {
-        height: 20px;
-        background-color: #4682B4; /* SteelBlue */
-        margin-bottom: 5px;
-        border-radius: 3px;
-    }
+     div[data-testid="stMetric"] div[data-testid="stMetricDelta"] div { /* Targeting the value div */
+         font-size: 1.8rem !important; /* Larger metric value */
+         font-weight: bold !important;
+         color: #1A237E !important; /* Darker blue */
+     }
+    /* Button */
     .stButton > button {
-        background-color: #4CAF50; /* Green */
+        background-color: #3F51B5; /* Indigo */
         color: white;
         font-weight: bold;
         padding: 0.75rem 1.5rem;
@@ -115,1191 +88,1097 @@ st.markdown("""
         border: none;
         cursor: pointer;
         transition: background-color 0.3s ease;
+        font-size: 1.1rem; /* Larger button text */
     }
     .stButton > button:hover {
-        background-color: #388E3C; /* Darker green */
+        background-color: #303F9F; /* Darker Indigo */
     }
      /* Adjust sidebar width */
     section[data-testid="stSidebar"] {
         width: 300px !important;
+        background-color: #f1f3f4; /* Sidebar background */
+    }
+    /* Style for tabs */
+    .stTabs [data-baseweb="tab-list"] {
+		gap: 24px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+		height: 50px;
+		white-space: pre-wrap;
+		background-color: #E8EAF6; /* Light background */
+		border-radius: 4px 4px 0 0;
+		gap: 10px;
+		padding: 10px 20px; /* Adjust padding */
+        font-size: 1rem;
+        font-weight: bold;
+    }
+
+    .stTabs [data-baseweb="tab"] svg {
+		color: #3F51B5; /* Icon color */
+    }
+
+    .stTabs [data-baseweb="tab"]:hover {
+		background-color: #C5CAE9; /* Hover background */
+    }
+
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+		background-color: #3F51B5; /* Selected tab background */
+		color: white; /* Selected text color */
+		border-bottom: 3px solid #FFC107; /* Accent color underline */
+    }
+    .stTabs [data-baseweb="tab"][aria-selected="true"] svg {
+		color: white; /* Selected icon color */
+    }
+     /* Style for st.info, st.warning, st.error */
+    div[data-testid="stAlert"] {
+        font-size: 1rem;
+        padding: 1rem;
+        border-radius: 5px;
+        margin-bottom: 1.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- Carregamento de Dados e Modelos (Cache) ---
-# Usamos st.cache_resource para carregar o modelo e preprocessor UMA VEZ
-# Usamos st.cache_data para carregar os dados UMA VEZ
+# --- Background Function (Optional) ---
+# def add_bg_from_base64(base64_string): ...
 
+# Função para exibir animação de carregamento
+def loading_animation(text="Processando..."):
+    progress_text = text
+    my_bar = st.progress(0, text=progress_text)
+
+    for percent_complete in range(100):
+        time.sleep(0.01)
+        my_bar.progress(percent_complete + 1, text=progress_text)
+    time.sleep(0.5)
+    my_bar.empty()
+
+# Função para gerar matriz de confusão interativa (mantida do código original)
+def plot_confusion_matrix_interactive(y_true, y_pred, class_names=None):
+    cm = confusion_matrix(y_true, y_pred)
+
+    fig = go.Figure(data=go.Heatmap(
+        z=cm,
+        x=class_names,
+        y=class_names,
+        colorscale='Blues',
+        showscale=True,
+        text=cm,
+        texttemplate="%{text}",
+        textfont={"size": 20},
+        hoverinfo="x+y+z",
+    ))
+
+    fig.update_layout(
+        title='Matriz de Confusão',
+        xaxis_title='Valores Previstos',
+        yaxis_title='Valores Reais',
+        xaxis=dict(side='top'),
+        yaxis=dict(autorange="reversed"),
+        margin=dict(t=50, b=50, l=50, r=50),
+    )
+
+    return fig, cm
+
+# Função para plotar matriz quadrada com mapa de calor (mais genérica, mantida)
+def plot_square_matrix_heatmap(matrix, title="Matriz Quadrada", x_labels=None, y_labels=None):
+    matrix_list = [[None if pd.isna(val) else float(val) for val in row] for row in matrix]
+    text_matrix = [[None if pd.isna(val) else f"{val:.2f}" for val in row] for row in matrix]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=matrix_list,
+        x=x_labels,
+        y=y_labels,
+        colorscale='Viridis',
+        showscale=True,
+        text=text_matrix,
+        texttemplate="%{text}",
+        hoverinfo="x+y+z",
+    ))
+
+    fig.update_layout(
+        title=title,
+        margin=dict(t=50, b=50, l=50, r=50),
+    )
+
+    return fig
+
+# Função para visualizar matriz de correlação (usando plotly express, mantida)
+def plot_correlation_matrix_px(df):
+    df_numeric = df.select_dtypes(include=np.number)
+
+    if df_numeric.empty:
+         return None, None
+
+    corr = df_numeric.corr()
+
+    fig = px.imshow(
+        corr,
+        labels=dict(color="Correlação"),
+        x=corr.columns,
+        y=corr.columns,
+        color_continuous_scale='RdBu_r',
+        range_color=[-1, 1],
+        aspect="auto",
+        text_auto=".2f",
+    )
+
+    fig.update_layout(
+        title="Matriz de Correlação",
+        margin=dict(t=50, b=50, l=50, r=50),
+    )
+
+    return fig, corr
+
+# Função para analisar propriedades de uma matriz quadrada (mantida)
+def analyze_square_matrix(matrix, title="Análise de Matriz"):
+    st.markdown(f'<h3 class="sub-header">{title}</h3>', unsafe_allow_html=True)
+
+    if not isinstance(matrix, np.ndarray) or matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        st.error("Input inválido: A matriz deve ser um array NumPy quadrado e 2D.")
+        return
+
+    size = matrix.shape[0]
+    st.write(f"**Dimensão da matriz:** {size}x{size}")
+
+    trace = np.trace(matrix)
+    st.write(f"**Traço da matriz:** {trace:.4f}")
+    st.info("O traço é a soma dos elementos na diagonal principal da matriz.")
+
+    try:
+        det = np.linalg.det(matrix)
+        st.write(f"**Determinante:** {det:.4e}")
+        if abs(det) < 1e-9:
+            st.warning("⚠️ O determinante é próximo de zero...")
+        else:
+             st.success("✅ O determinante sugere que a matriz não é singular.")
+        st.info("O determinante indica se a matriz é invertível...")
+    except np.linalg.LinAlgError:
+        st.error("❌ Não foi possível calcular o determinante...")
+        det = None
+
+    st.write("**Valores próprios (Eigenvalues):**")
+    try:
+        eigenvalues = np.linalg.eigvals(matrix)
+        sorted_eigenvalues = np.sort(np.abs(eigenvalues))[::-1]
+
+        for i, val in enumerate(sorted_eigenvalues):
+            original_val = eigenvalues[np.where(np.isclose(np.abs(eigenvalues), val))[0][0]]
+            st.write(f"λ{i+1} (Magnitude) = {val:.4f} (Original: {original_val:.4f})")
+
+        if any(val < 1e-9 for val in sorted_eigenvalues):
+             st.warning("⚠️ Alguns valores próprios são próximos de zero...")
+        else:
+             st.success("✅ Os valores próprios indicam que a matriz não tem direções nulas...")
+        st.info("Valores próprios representam os fatores de escala...")
+
+    except np.linalg.LinAlgError:
+        st.error("❌ Não foi possível calcular os valores próprios.")
+
+    try:
+        condition_number = np.linalg.cond(matrix)
+        st.write(f"**Número de Condição:** {condition_number:.4e}")
+        if condition_number > 1000:
+            st.warning("⚠️ Alto número de condição. A matriz é mal condicionada...")
+        else:
+            st.success("✅ Número de condição razoável. A matriz está bem condicionada.")
+        st.info("O número de condição mede a sensibilidade...")
+    except np.linalg.LinAlgError:
+         st.error("❌ Não foi possível calcular o número de condição.")
+    except Exception as e:
+         st.error(f"❌ Erro ao calcular número de condição: {e}")
+
+
+# --- Carregar Artefactos Treinados (Refatorado para retornar status e resultado) ---
 @st.cache_resource
-def load_artefacts(artefacts_dir='artefacts'):
-    """Carrega o preprocessor e o modelo treinado."""
-    preprocessor_path = os.path.join(artefacts_dir, 'preprocessor.joblib')
-    model_path = os.path.join(artefacts_dir, 'best_model.joblib')
-    feature_names_path = os.path.join(artefacts_dir, 'processed_feature_names.joblib')
-
-    preprocessor, model, processed_feature_names = None, None, None
+def load_pipeline_artefacts_safe():
+    # Caminho corrigido para a pasta artifacts (agora está no mesmo nível do script)
+    artefacts_path = 'artefacts/'
+    preprocessor_path = os.path.join(artefacts_path, 'preprocessor.joblib')
+    # Use o nome exato do ficheiro do seu modelo treinado final
+    model_path = os.path.join(artefacts_path, 'best_model.joblib') # Ajuste este nome se necessário
+    # Caminhos para os ficheiros de nomes de colunas
+    original_cols_path = os.path.join(artefacts_path, 'original_input_columns.joblib')
+    # Ajuste o nome do ficheiro de features processadas se for diferente
+    # Use o nome que aparece na sua imagem: processed_feature_names.joblib (sem after_onehot)
+    processed_cols_path = os.path.join(artefacts_path, 'processed_feature_names.joblib') # Nome CORRIGIDO
 
     try:
         preprocessor = joblib.load(preprocessor_path)
-        st.success("✅ Pré-processador carregado com sucesso!")
-    except FileNotFoundError:
-        st.error(f"Erro: Ficheiro do pré-processador '{preprocessor_path}' não encontrado.")
-    except Exception as e:
-        st.error(f"Erro ao carregar o pré-processador: {e}")
-
-    try:
         model = joblib.load(model_path)
-        st.success("✅ Modelo treinado carregado com sucesso!")
-    except FileNotFoundError:
-        st.error(f"Erro: Ficheiro do modelo '{model_path}' não encontrado.")
+        original_cols = joblib.load(original_cols_path)
+        processed_cols = joblib.load(processed_cols_path) # Carregar com o nome corrigido
+
+        st.success("✅ Artefactos do pipeline (pré-processador, modelo e nomes de colunas) carregados com sucesso!")
+        # Em caso de sucesso, retorna True e os 4 objetos numa tupla
+        return True, (preprocessor, model, original_cols, processed_cols)
+
+    except FileNotFoundError as e:
+        error_msg = f"❌ Erro ao carregar artefactos essenciais: {e}. Certifique-se de que todos os ficheiros .joblib estão na pasta '{artefacts_path}' e têm os nomes corretos."
+        # Em caso de FileNotFoundError, retorna False e a mensagem de erro
+        return False, error_msg
     except Exception as e:
-        st.error(f"Erro ao carregar o modelo: {e}")
+        error_msg = f"❌ Ocorreu um erro inesperado ao carregar artefactos: {e}"
+        # Em caso de qualquer outro erro, retorna False e a mensagem de erro
+        return False, error_msg
 
-    try:
-        processed_feature_names = joblib.load(feature_names_path)
-        st.success("✅ Nomes das features processadas carregados com sucesso!")
-    except FileNotFoundError:
-        st.error(f"Erro: Ficheiro com nomes das features processadas '{feature_names_path}' não encontrado.")
-    except Exception as e:
-        st.error(f"Erro ao carregar nomes das features processadas: {e}")
+# --- Chamar a função de carregamento e verificar o resultado ---
+success_artefacts, loaded_artefacts_result = load_pipeline_artefacts_safe()
+
+# Se não foi sucesso, exibir o erro e parar a aplicação
+if not success_artefacts:
+    st.error(loaded_artefacts_result) # loaded_artefacts_result contém a mensagem de erro
+    st.stop() # Parar a execução da app se os artefactos essenciais não carregarem
+else:
+    # Se foi sucesso, desempacotar os 4 objetos do resultado da tupla
+    preprocessor, model, original_cols, processed_cols = loaded_artefacts_result
 
 
-    if preprocessor is None or model is None or processed_feature_names is None:
-         st.warning("Certifica-te de que executaste a script de treino/notebook para gerar e guardar todos os artefactos necessários ('artefacts' folder).")
-         # Retorna None para que as secções que dependem deles saibam que não podem funcionar
-         return None, None, None
-
-    return preprocessor, model, processed_feature_names
-
+# --- Carregar o seu Dataset Original para EDA ---
+# Use st.cache_data para carregar os dados apenas uma vez
 @st.cache_data
-def load_data(file_path='student-data.csv'):
-    """Carrega os dados originais."""
+def load_student_data():
+    data_path = 'student-data.csv' # Assumindo que está no mesmo nível do script e da pasta data/artifacts
     try:
-        data = pd.read_csv(file_path)
-        st.success(f"✅ Dados originais '{file_path}' carregados com sucesso!")
-        # Adicionar mapeamento da coluna alvo se o 'passed' estiver no CSV original
-        if 'passed' in data.columns:
-            data['passed_mapped'] = data['passed'].map({'yes': 1, 'no': 0})
-        return data
+        df = pd.read_csv(data_path)
+        st.success(f"✅ Dataset '{data_path}' carregado com sucesso ({df.shape[0]} linhas, {df.shape[1]} colunas).")
+        return df
     except FileNotFoundError:
-        st.error(f"Erro: Ficheiro de dados '{file_path}' não encontrado.")
-        st.warning("Gerando dados fictícios para demonstração. A previsão não será baseada no modelo treinado com os teus dados.")
-        return generate_mock_data()
+        st.error(f"❌ Erro: O ficheiro '{data_path}' não foi encontrado. Certifique-se de que o dataset está no local correto.")
+        st.stop() # Parar a execução se o dataset não for encontrado
     except Exception as e:
-        st.error(f"Erro ao carregar os dados: {e}")
-        st.warning("Gerando dados fictícios para demonstração.")
-        return generate_mock_data()
+        st.error(f"❌ Ocorreu um erro ao carregar o dataset: {e}")
+        st.stop() # Parar a execução em caso de outro erro
+
+# Carregar o dataset original
+student_df_original = load_student_data()
+
+# Identificar a coluna alvo original
+TARGET_ORIGINAL_NAME = 'passed' # Nome da coluna alvo no dataset original
+if TARGET_ORIGINAL_NAME not in student_df_original.columns:
+    st.error(f"❌ Coluna alvo original '{TARGET_ORIGINAL_NAME}' não encontrada no dataset. A aplicação pode não funcionar corretamente.")
+    # Opcional: st.stop() # parar se a coluna alvo não for encontrada no dataset original
 
 
-# Função para gerar dados fictícios (usada se o CSV original não for encontrado)
-# Adicionei mais colunas para que se assemelhe mais ao teu dataset real
-def generate_mock_data():
-    """Gera dados fictícios para demonstração quando o arquivo original não é encontrado."""
-    st.info("Gerando dados fictícios...")
-    np.random.seed(42)
-    n_samples = 50 # Reduzi o número para mock data
+# Definir os nomes das classes para a saída da previsão e avaliação
+# No seu notebook, 0 foi mapeado para 'no' e 1 para 'yes'.
+CLASS_NAMES = ['no', 'yes'] # Correspondem aos valores 0 e 1
 
-    # Nomes de colunas baseados no teu notebook
-    cols = ['school', 'sex', 'age', 'address', 'famsize', 'Pstatus', 'Medu', 'Fedu',
-            'Mjob', 'Fjob', 'reason', 'guardian', 'traveltime', 'studytime', 'failures',
-            'schoolsup', 'famsup', 'paid', 'activities', 'nursery', 'higher', 'internet',
-            'romantic', 'famrel', 'freetime', 'goout', 'Dalc', 'Walc', 'health', 'absences',
-            'passed', 'G1', 'G2', 'G3'] # Incluir G1, G2, G3 e passed
-
-    data = pd.DataFrame(index=range(n_samples), columns=cols)
-
-    # Preencher com dados aleatórios (tentando simular tipos originais)
-    for col in cols:
-        if col in ['school', 'sex', 'address', 'famsize', 'Pstatus', 'Mjob', 'Fjob', 'reason', 'guardian',
-                   'schoolsup', 'famsup', 'paid', 'activities', 'nursery', 'higher', 'internet', 'romantic']:
-            # Colunas categóricas (Object) - usar valores comuns do teu EDA
-            if col == 'school': options = ['GP', 'MS']
-            elif col == 'sex': options = ['F', 'M']
-            elif col == 'address': options = ['U', 'R']
-            elif col == 'famsize': options = ['LE3', 'GT3']
-            elif col == 'Pstatus': options = ['T', 'A']
-            elif col == 'Mjob' or col == 'Fjob': options = ['at_home', 'health', 'other', 'services', 'teacher']
-            elif col == 'reason': options = ['course', 'home', 'other', 'reputation']
-            elif col == 'guardian': options = ['father', 'mother', 'other']
-            elif col in ['schoolsup', 'famsup', 'paid', 'activities', 'nursery', 'higher', 'internet', 'romantic']: options = ['yes', 'no']
-            else: options = ['Cat_A', 'Cat_B'] # Fallback
-            data[col] = np.random.choice(options, n_samples)
-
-        elif col in ['age', 'Medu', 'Fedu', 'traveltime', 'studytime', 'failures', 'famrel', 'freetime', 'goout',
-                     'Dalc', 'Walc', 'health', 'absences', 'G1', 'G2', 'G3']:
-             # Colunas numéricas (Int64) - usar ranges aproximados do teu EDA
-            if col == 'age': data[col] = np.random.randint(15, 23, n_samples)
-            elif col in ['Medu', 'Fedu']: data[col] = np.random.randint(0, 5, n_samples)
-            elif col in ['traveltime', 'studytime', 'failures']: data[col] = np.random.randint(0, 4, n_samples)
-            elif col in ['famrel', 'freetime', 'goout', 'Dalc', 'Walc', 'health']: data[col] = np.random.randint(1, 6, n_samples)
-            elif col == 'absences': data[col] = np.random.randint(0, 15, n_samples) # Range menor para mock
-            elif col in ['G1', 'G2', 'G3']: data[col] = np.random.randint(0, 21, n_samples)
-            else: data[col] = np.random.randint(0, 10, n_samples) # Fallback
+# Definir o nome da coluna alvo APÓS o mapeamento (usado no teste processado)
+TARGET_PROCESSED_NAME = 'passed_mapped'
 
 
-    # Gerar coluna 'passed' baseada em G3 (nota final) para mock data
-    # Define um threshold aleatório para simular aprovação
-    mock_threshold = np.random.randint(9, 11) # threshold de 9 ou 10 para mock
-    data['passed'] = np.where(data['G3'] >= mock_threshold, 'yes', 'no')
-    data['passed_mapped'] = np.where(data['G3'] >= mock_threshold, 1, 0)
+# --- Função para carregar os conjuntos de dados processados (treino e teste) ---
+@st.cache_data
+def load_processed_data(target_col_name):
+    # Caminhos para os ficheiros processados (data/processed deve estar no mesmo nível do script)
+    processed_train_path = 'data/processed/train_processed.csv'
+    processed_test_path = 'data/processed/test_processed.csv'
 
-    return data
+    train_df_processed = None
+    test_df_processed = None
+    errors = []
 
-
-# --- Execução inicial (carregamento de artefactos e dados) ---
-# Define TEST_SIZE para usar na descrição da secção de pré-processamento
-TEST_SIZE = 0.2 # Ajusta este valor se usaste um diferente no teu notebook
-
-preprocessor, model, processed_feature_names = load_artefacts()
-data = load_data()
-
-# Certificar que as colunas de input originais são identificadas (para a secção Previsão)
-# Isto é feito após o carregamento dos dados originais
-original_input_columns = []
-if data is not None:
-     # Excluir colunas alvo e quaisquer outras que não sejam features de input originais
-     # Assumimos que 'passed' e 'passed_mapped' (se existir) são as colunas alvo a excluir
-     cols_to_exclude = ['passed', 'passed_mapped']
-     original_input_columns = [col for col in data.columns.tolist() if col not in cols_to_exclude]
-     # Verifica a lista 'original_input_columns' para ter a certeza que contém as 30 colunas de input esperadas
+    try:
+        train_df_processed = pd.read_csv(processed_train_path)
+        if target_col_name not in train_df_processed.columns:
+             errors.append(f"❌ Erro: A coluna alvo processada '{target_col_name}' não foi encontrada no ficheiro '{processed_train_path}'.")
+             train_df_processed = None # Invalidar o dataframe de treino se a coluna alvo estiver faltando
+        else:
+             st.success(f"✅ Conjunto de treino processado carregado ({train_df_processed.shape[0]} linhas).")
+    except FileNotFoundError:
+        errors.append(f"⚠️ Ficheiro de treino processado '{processed_train_path}' não encontrado. Algumas funcionalidades podem estar limitadas.")
+    except Exception as e:
+        errors.append(f"❌ Ocorreu um erro ao carregar o conjunto de treino processado: {e}")
+        train_df_processed = None
 
 
-# --- Sidebar ---
+    try:
+        test_df_processed = pd.read_csv(processed_test_path)
+        if target_col_name not in test_df_processed.columns:
+             errors.append(f"❌ Erro: A coluna alvo processada '{target_col_name}' não foi encontrada no ficheiro '{processed_test_path}'.")
+             test_df_processed = None # Invalidar o dataframe de teste se a coluna alvo estiver faltando
+        else:
+             st.success(f"✅ Conjunto de teste processado carregado ({test_df_processed.shape[0]} linhas).")
+    except FileNotFoundError:
+        errors.append(f"⚠️ Ficheiro de teste processado '{processed_test_path}' não encontrado. Algumas funcionalidades podem estar limitadas.")
+    except Exception as e:
+        errors.append(f"❌ Ocorreu um erro ao carregar o conjunto de teste processado: {e}")
+        test_df_processed = None
+
+    # Exibir todos os erros ou avisos acumulados
+    for err in errors:
+        st.markdown(err) # Usar markdown para permitir ícones
+
+    return train_df_processed, test_df_processed
+
+# Carregar os conjuntos de treino e teste processados
+train_df_processed_global, test_df_processed_global = load_processed_data(TARGET_PROCESSED_NAME)
+
+
+# --- Lista de modelos disponíveis para a secção "Análise de Matriz" ---
+# Estes são tipos de modelos que podem ser instanciados e treinados na hora
+AVAILABLE_MODELS_FOR_ANALYSIS = {
+    "Regressão Logística": LogisticRegression(random_state=42, max_iter=1000),
+    "KNN": KNeighborsClassifier(),
+    "Árvore de Decisão": DecisionTreeClassifier(random_state=42),
+    "Random Forest": RandomForestClassifier(random_state=42),
+    "SVM (Kernel RBF)": SVC(probability=True, random_state=42),
+    "Gradient Boosting": GradientBoostingClassifier(random_state=42),
+    "AdaBoost": AdaBoostClassifier(random_state=42)
+}
+
+
+# --- Sidebar para navegação ---
 with st.sidebar:
-    # st.image("https://via.placeholder.com/150x150.png?text=SIS", width=150) # Substituir por uma imagem tua se quiseres
-    st.title("Student Intervention System")
+    # st.image("https://cdn-icons-png.flaticon.com/512/2103/2103658.png", width=100) # Substituir por uma imagem tua
+    st.markdown('<h1 class="sub-header" style="text-align: center;">Sistema de Intervenção Estudantil</h1>', unsafe_allow_html=True) # Ajustado Título
 
-    # Menu de navegação com ícones
-    page = st.radio(
-        "Menu",
-        ["🏠 Início", "📊 EDA", "🔍 Pré-processamento", "🧠 Modelos e Avaliação", "🔮 Previsão"],
-        #label_visibility="collapsed" # Uncomment if you want to hide the label "Menu"
+    menu = option_menu(
+        menu_title=None, # hide menu title
+        options=["Início", "Exploração de Dados", "Previsão Individual", "Análise do Modelo Treinado", "Análise de Matriz", "Documentação"], # Ajustado opções
+        icons=["house-door", "bar-chart-line", "clipboard-data", "robot", "grid-3x3", "book"], # Ícones correspondentes
+        menu_icon="cast", # Ícone geral do menu
+        default_index=0, # Página inicial por defeito
     )
 
     st.markdown("---")
-    st.markdown("### Sobre o Projeto")
+    st.markdown("### Sobre a Aplicação")
     st.info("""
-    Sistema de Intervenção Estudantil para prever o sucesso académico
-    (passar/reprovar) e identificar alunos em risco.
-    """)
+    Ferramenta interativa para explorar o dataset estudantil, fazer previsões
+    individuais e analisar o modelo de Machine Learning treinado e suas propriedades.
+    """) # Ajustado descrição
 
-    st.markdown("### Autor")
-    st.markdown("Afonso Miguel Vieira Marcos - 202404088")
-    st.markdown("---")
+    st.markdown("### Desenvolvido com ❤️")
     st.write("Framework: Streamlit")
-    st.write("Versão Streamlit:", st.__version__)
-    # Check if joblib is loaded successfully before printing version
-    try:
-         # Tentar carregar um modelo dummy apenas para obter a versão do sklearn associada ao joblib
-         # Isto pode falhar se joblib não estiver instalado ou se houver problemas
-         sklearn_version = joblib.__version__
-         st.write("Versão scikit-learn:", sklearn_version)
-    except Exception as e:
-         st.write("Versão scikit-learn: N/A")
-         # st.warning(f"Could not get scikit-learn version from joblib: {e}") # Debugging info
+    st.write("Linguagem: Python")
+    st.write("Bibliotecas: scikit-learn, pandas, numpy, plotly, joblib")
 
 
 # --- Conteúdo Principal ---
 
-if page == "🏠 Início":
-    st.markdown('<h1 class="main-header">Student Intervention System</h1>', unsafe_allow_html=True)
+if menu == "Início":
+    st.markdown('<h1 class="main-header">Bem-vindo ao Sistema de Intervenção Estudantil 🚀</h1>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns([2, 1])
+    st.markdown('<p class="info-text">Este aplicativo é uma ferramenta interativa baseada no seu modelo de Machine Learning para prever o desempenho estudantil, usando o dataset "UCI Student Performance".</p>', unsafe_allow_html=True) # Ajustado texto
 
+    # Ajustar métricas de resumo na página inicial
+    col1, col2, col3 = st.columns(3)
+
+    # Número de amostras no seu dataset
     with col1:
-        st.markdown("""
-        ### Bem-vindo à Aplicação Streamlit
-        
-        Esta aplicação demonstra a **análise, processamento e modelagem de dados** de estudantes para prever 
-        se um estudante irá passar ou reprovar, com base em características académicas e sociais.
-        
-        ### Objetivo do Projeto
-        O objetivo principal é criar um sistema preditivo que possa identificar precocemente alunos em risco
-        de reprovação, permitindo intervenções direcionadas para melhorar seu desempenho.
-        
-        ### Características do Dataset
-        O conjunto de dados original contém diversas variáveis sobre os estudantes. Pode explorar
-        esses dados na secção **EDA**.
-        """)
-
-    with col2:
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        if data is not None and 'passed_mapped' in data.columns:
-            total_students = len(data)
-            pass_rate = (data['passed_mapped'].sum() / total_students) * 100
-            num_features = len(original_input_columns)
-
-            st.metric("Total de Alunos", f"{total_students}")
-            st.metric("Taxa de Aprovação", f"{pass_rate:.1f}%")
-            st.metric("Variáveis de Input", f"{num_features}")
-        else:
-             st.warning("Dados não carregados, métricas indisponíveis.")
+        st.metric("Amostras no Dataset", f"{student_df_original.shape[0]}")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("---")
-
-    # Como usar a aplicação
-    st.markdown('<h2 class="sub-header">Como Usar Esta Aplicação</h2>', unsafe_allow_html=True)
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.markdown("### 1. Explorar Dados")
-        st.markdown("Visualize estatísticas e gráficos para entender os dados.")
-
+    # Número de características originais (usando a lista carregada)
     with col2:
-        st.markdown("### 2. Pré-processamento")
-        st.markdown("Veja como os dados são preparados para os algoritmos de ML.")
-
-    with col3:
-        st.markdown("### 3. Modelos")
-        st.markdown("Compare diferentes algoritmos de classificação.")
-
-    with col4:
-        st.markdown("### 4. Previsão")
-        st.markdown("Faça previsões para novos alunos em tempo real.")
-
-elif page == "📊 EDA":
-    st.markdown('<h1 class="main-header">Análise Exploratória de Dados (EDA)</h1>', unsafe_allow_html=True)
-
-    st.write("Esta secção apresenta uma visão geral e visualizações importantes do dataset original.")
-
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Visão Geral", "📈 Distribuições", "🔍 Correlações", "📊 Visualizações Chave"])
-
-    if data is None:
-         st.warning("Não foi possível carregar os dados para EDA. A secção está limitada ou a mostrar dados fictícios.")
-         # Se os dados fictícios foram carregados, continuar com eles
-         if not data.empty:
-              st.dataframe(data.head()) # Mostrar pelo menos que há dados
-
-    else: # Se os dados foram carregados (originais ou fictícios)
-        with tab1:
-            st.markdown('<h2 class="sub-header">Informação Geral do Dataset</h2>', unsafe_allow_html=True)
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.write("**Dimensões do Dataset:**", data.shape)
-
-                # Mostrar info() de forma amigável
-                st.write("**Informação do DataFrame:**")
-                buffer = io.StringIO()
-                data.info(buf=buffer)
-                st.text(buffer.getvalue())
-
-                # Valores ausentes
-                missing_values = data.isnull().sum()
-                if missing_values.sum() > 0:
-                    st.write("**Valores Ausentes por Coluna:**")
-                    st.dataframe(missing_values[missing_values > 0].rename("Valores Ausentes"))
-                    st.warning(f"Total de valores ausentes no dataset: {missing_values.sum()}")
-                else:
-                    st.success("✅ Não existem valores ausentes no dataset.")
-
-            with col2:
-                st.write("**Primeiras 5 Linhas:**")
-                st.dataframe(data.head(5), use_container_width=True)
-
-                st.write("**Estatísticas Descritivas (Numéricas):**")
-                st.dataframe(data.describe().round(2), use_container_width=True)
-
-            st.markdown('<h3 class="sub-header" style="font-size: 1.5rem; border-bottom: none;">Valores Únicos por Coluna</h3>', unsafe_allow_html=True)
-            unique_values_info = {}
-            for col in data.columns:
-                 num_unique = data[col].nunique()
-                 unique_values = data[col].unique()
-                 try:
-                     # Tenta ordenar apenas se forem tipos compatíveis
-                     sorted_unique_values = np.sort(unique_values)
-                     values_str = ', '.join(map(str, sorted_unique_values))
-                 except TypeError: # Se não der para ordenar (tipos mistos ou object)
-                     values_str = ', '.join(map(str, unique_values))
-                 # Limitar string para não ficar muito longa
-                 if len(values_str) > 150:
-                     values_str = values_str[:150] + '...'
-                 unique_values_info[col] = {"Num Únicos": num_unique, "Valores Exemplos": values_str}
-            st.dataframe(pd.DataFrame.from_dict(unique_values_info, orient='index'))
-
-
-        with tab2:
-            st.markdown('<h2 class="sub-header">Distribuição das Variáveis</h2>', unsafe_allow_html=True)
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # Distribuição da variável alvo
-                st.write("### Distribuição da Variável Alvo (passed):")
-
-                # Calcular contagens
-                if 'passed' in data.columns:
-                    passed_counts = data['passed'].value_counts()
-                    passed_pct = data['passed'].value_counts(normalize=True) * 100
-
-                    fig, ax = plt.subplots(figsize=(8, 5))
-                    ax.bar(['Aprovado', 'Reprovado'],
-                           [passed_counts.get('yes', 0), passed_counts.get('no', 0)], # Use .get para evitar KeyError se uma classe não existir
-                           color=['#4CAF50', '#F44336'])
-
-                    # Adicionar percentagens
-                    for i, p in enumerate([passed_pct.get('yes', 0), passed_pct.get('no', 0)]):
-                        ax.text(i, passed_counts.iloc[i]/2, f'{p:.1f}%',
-                                ha='center', va='center', color='white', fontweight='bold')
-
-                    ax.set_ylabel('Número de Estudantes')
-                    ax.set_title('Distribuição de Aprovados e Reprovados')
-                    st.pyplot(fig)
-                    plt.close(fig)
-                else:
-                    st.warning("Coluna 'passed' não encontrada para mostrar a distribuição do alvo.")
-
-
-            with col2:
-                # Seletor de variável numérica para histograma
-                num_cols = data.select_dtypes(include=np.number).columns.tolist()
-                # Excluir passed_mapped se existir
-                num_cols = [col for col in num_cols if col != 'passed_mapped']
-
-                if num_cols:
-                     selected_num = st.selectbox(
-                         "Selecione uma variável numérica para visualizar a distribuição:",
-                         options=num_cols
-                     )
-
-                     # Criar histograma com KDE para a variável selecionada
-                     fig, ax = plt.subplots(figsize=(8, 5))
-                     sns.histplot(data=data, x=selected_num, kde=True, ax=ax)
-
-                     # Adicionar média e mediana
-                     mean_val = data[selected_num].mean()
-                     median_val = data[selected_num].median()
-
-                     ax.axvline(mean_val, color='red', linestyle='--', label=f'Média: {mean_val:.2f}')
-                     ax.axvline(median_val, color='green', linestyle=':', label=f'Mediana: {median_val:.2f}')
-                     ax.legend()
-
-                     ax.set_title(f'Distribuição de {selected_num}')
-                     ax.set_xlabel(selected_num)
-                     st.pyplot(fig)
-                     plt.close(fig)
-                else:
-                     st.info("Não há colunas numéricas para mostrar distribuições.")
-
-
-            # Variáveis categóricas
-            st.markdown("### Distribuição de Variáveis Categóricas")
-
-            cat_cols = data.select_dtypes(include='object').columns.tolist()
-            # Excluir passed se existir
-            cat_cols = [col for col in cat_cols if col != 'passed']
-
-            if cat_cols:
-                selected_cat = st.selectbox(
-                    "Selecione uma variável categórica para visualizar a distribuição:",
-                    options=cat_cols
-                )
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-
-                # Contar valores e plotar
-                cat_counts = data[selected_cat].value_counts().sort_values(ascending=False)
-                cat_pct = data[selected_cat].value_counts(normalize=True).sort_values(ascending=False) * 100
-
-                # Usar cores do Seaborn para barras
-                palette = sns.color_palette("viridis", len(cat_counts))
-                bars = ax.bar(cat_counts.index, cat_counts.values, color=palette)
-
-                # Adicionar percentagens
-                for i, bar in enumerate(bars):
-                    height = bar.get_height()
-                    # Position text above the bar, adjust y position slightly
-                    ax.text(bar.get_x() + bar.get_width()/2, height + (ax.get_ylim()[1]*0.01),
-                            f'{cat_pct.iloc[i]:.1f}%',
-                            ha='center', va='bottom', fontsize=9)
-
-                ax.set_title(f'Distribuição de {selected_cat}')
-                ax.set_ylabel('Contagem')
-                ax.set_xlabel(selected_cat)
-
-                # Rotacionar labels se houver muitas categorias
-                if len(cat_counts) > 5:
-                    plt.xticks(rotation=45, ha='right')
-
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
-            else:
-                 st.info("Não há colunas categóricas para mostrar distribuições.")
-
-
-        with tab3:
-            st.markdown('<h2 class="sub-header">Análise de Correlações</h2>', unsafe_allow_html=True)
-
-            # Selecionar apenas variáveis numéricas para a matriz de correlação
-            num_data = data.select_dtypes(include=np.number)
-
-            if not num_data.empty and num_data.shape[1] > 1:
-                 # Calcular correlação
-                 corr_matrix = num_data.corr()
-
-                 # Criar mapa de calor com Seaborn
-                 fig, ax = plt.subplots(figsize=(12, 10))
-                 heatmap = sns.heatmap(
-                     corr_matrix,
-                     annot=True,
-                     cmap='coolwarm', # Use a diverging colormap
-                     fmt=".2f",
-                     linewidths=0.5,
-                     ax=ax,
-                     annot_kws={"size": 8} # Adjust font size for annotations
-                 )
-
-                 plt.title('Matriz de Correlação entre Variáveis Numéricas', fontsize=15)
-                 plt.xticks(rotation=45, ha='right', fontsize=8)
-                 plt.yticks(fontsize=8)
-
-                 # Ajustar layout para evitar corte das labels
-                 plt.tight_layout()
-
-                 st.pyplot(fig)
-                 plt.close(fig)
-
-                 # Top correlações com a variável alvo
-                 if 'passed_mapped' in num_data.columns:
-                     st.write("### Top 10 Correlações com 'passed_mapped'")
-
-                     # Calcular correlações com o alvo, remover o próprio alvo e ordenar
-                     passed_corr = corr_matrix['passed_mapped'].drop('passed_mapped', errors='ignore').sort_values(ascending=False)
-
-                     if not passed_corr.empty:
-                         fig, ax = plt.subplots(figsize=(10, 6))
-                         # Garantir que só pegamos até 10 se existirem
-                         top_corr = passed_corr.head(10)
-                         bars = ax.barh(
-                             top_corr.index,
-                             top_corr.values,
-                             color=plt.cm.viridis(np.linspace(0, 1, len(top_corr))) # Dynamic color based on number of bars
-                         )
-
-                         # Add values on the bars
-                         for i, bar in enumerate(bars):
-                              width = bar.get_width()
-                              # Determine horizontal alignment based on bar width
-                              ha = 'left' if width > 0 else 'right'
-                              # Position text slightly outside the bar
-                              x_pos = width + (ax.get_xlim()[1] * 0.01) if width > 0 else width - (ax.get_xlim()[1] * 0.01)
-                              ax.text(
-                                  x_pos,
-                                  bar.get_y() + bar.get_height()/2,
-                                  f'{top_corr.values[i]:.2f}',
-                                  ha=ha,
-                                  va='center',
-                                  fontsize=9
-                              )
-
-
-                         ax.set_xlabel('Correlação com passed_mapped')
-                         ax.set_title('Top Variáveis Correlacionadas com Aprovação')
-                         ax.grid(axis='x', linestyle='--', alpha=0.7)
-                         ax.set_axisbelow(True)
-
-                         plt.tight_layout()
-                         st.pyplot(fig)
-                         plt.close(fig)
-                     else:
-                         st.info("Nenhuma correlação encontrada (apenas uma coluna numérica além do alvo?).")
-                 else:
-                      st.warning("Coluna 'passed_mapped' não encontrada nas colunas numéricas para calcular correlações com o alvo.")
-            else:
-                 st.info("Não há colunas numéricas suficientes para calcular e mostrar a matriz de correlação.")
-
-
-        with tab4:
-            st.markdown('<h2 class="sub-header">Visualizações Chave</h2>', unsafe_allow_html=True)
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # Box plot para 'absences' por situação final
-                st.write("### Faltas por Situação Final")
-
-                if 'passed' in data.columns and 'absences' in data.columns:
-                    fig, ax = plt.subplots(figsize=(10, 6))
-
-                    sns.boxplot(
-                        x='passed',
-                        y='absences',
-                        data=data,
-                        palette={'yes': '#4CAF50', 'no': '#F44336'},
-                        ax=ax
-                    )
-
-                    # Adicionar estatísticas por grupo (média e mediana)
-                    for i, status in enumerate(['yes', 'no']):
-                        subset = data[data['passed'] == status]
-                        if not subset.empty:
-                            mean_val = subset['absences'].mean()
-                            median_val = subset['absences'].median()
-
-                            # Adicionar linha para média e mediana
-                            x_pos = 0 if status == 'yes' else 1
-                            ax.hlines(mean_val, x_pos-0.3, x_pos+0.3, colors='blue', linestyles='--',
-                                    label='Média' if i == 0 else "") # Label only for the first line for legend
-                            ax.hlines(median_val, x_pos-0.3, x_pos+0.3, colors='orange', linestyles=':',
-                                    label='Mediana' if i == 0 else "") # Label only for the first line
-
-                            # Add text labels slightly above/below lines
-                            ax.text(x_pos, mean_val + ax.get_ylim()[1]*0.01, f'Média: {mean_val:.1f}',
-                                    ha='center', fontsize=9, color='blue')
-                            ax.text(x_pos, median_val - ax.get_ylim()[1]*0.02, f'Mediana: {median_val:.1f}',
-                                    ha='center', fontsize=9, color='orange')
-
-
-                    ax.set_title('Distribuição de Faltas por Situação Final')
-                    ax.set_xlabel('Situação Final')
-                    ax.set_ylabel('Número de Faltas')
-                    ax.set_xticklabels(['Passou', 'Não Passou'])
-
-                    # Add legend if lines were added
-                    if 'Média' in ax.get_legend_handles_labels()[1]:
-                         ax.legend(loc='upper right')
-
-
-                    # Adicionar grid e melhorar o visual
-                    ax.grid(axis='y', linestyle='--', alpha=0.7)
-                    ax.set_axisbelow(True) # Ensure grid is behind data
-
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    plt.close(fig)
-                else:
-                     st.info("Colunas 'passed' ou 'absences' não encontradas para esta visualização.")
-
-            with col2:
-                 # Scatter plot entre duas variáveis numéricas com hue por situação final
-                st.write("### Relação entre Variáveis Numéricas")
-
-                num_cols = data.select_dtypes(include=np.number).columns.tolist()
-                # Remover a coluna alvo
-                num_cols = [col for col in num_cols if col != 'passed_mapped']
-
-                if num_cols and 'passed' in data.columns:
-                     # Definir colunas padrão para mostrar a relação entre notas (se existirem)
-                     default_x = num_cols.index('G1') if 'G1' in num_cols else (0 if num_cols else None)
-                     default_y = num_cols.index('G3') if 'G3' in num_cols else (min(1, len(num_cols)-1) if len(num_cols)>1 else None)
-
-                     if default_x is not None and default_y is not None:
-                         x_col = st.selectbox("Variável X:", num_cols, index=default_x)
-                         y_col = st.selectbox("Variável Y:", num_cols, index=default_y)
-
-                         fig, ax = plt.subplots(figsize=(10, 6))
-
-                         # Scatter plot com transparência para ver densidade de pontos
-                         sns.scatterplot(
-                             x=x_col,
-                             y=y_col,
-                             hue='passed',
-                             palette={'yes': '#4CAF50', 'no': '#F44336'},
-                             s=80,
-                             alpha=0.7,
-                             data=data,
-                             ax=ax
-                         )
-
-                         # Adicionar linha de regressão para cada grupo
-                         for status, color in zip(['yes', 'no'], ['#4CAF50', '#F44336']):
-                             subset = data[data['passed'] == status]
-                             # Verificar se há dados suficientes (pelo menos 2 pontos)
-                             if len(subset) > 1 and x_col in subset.columns and y_col in subset.columns:
-                                 # Need to handle potential all-NaN values in columns before regplot
-                                 if not subset[[x_col, y_col]].isnull().all().any():
-                                     sns.regplot(
-                                         x=x_col,
-                                         y=y_col,
-                                         data=subset,
-                                         scatter=False, # Don't plot points again
-                                         ax=ax,
-                                         line_kws={'color': color, 'linestyle': '--'},
-                                         ci=None # No confidence interval for cleaner look
-                                     )
-
-                         # Adicionar rótulos
-                         ax.set_title(f'Scatter Plot: {x_col} vs {y_col} por Situação Final')
-                         ax.set_xlabel(x_col)
-                         ax.set_ylabel(y_col)
-
-                         # Alterar legenda
-                         handles, labels = ax.get_legend_handles_labels()
-                         # Ensure labels are correct for 'yes' and 'no'
-                         legend_labels = ['Passou', 'Não Passou'] if 'yes' in labels and 'no' in labels else labels
-                         ax.legend(handles, legend_labels, title='Situação Final')
-
-
-                         # Adicionar grid
-                         ax.grid(linestyle='--', alpha=0.5)
-                         ax.set_axisbelow(True)
-
-                         plt.tight_layout()
-                         st.pyplot(fig)
-                         plt.close(fig)
-                     else:
-                         st.info("Não há colunas numéricas suficientes para gerar um scatter plot.")
-                else:
-                     st.info("Não há colunas numéricas ou a coluna 'passed' não foi encontrada para esta visualização.")
-
-
-            # Análise de tempo livre vs faltas
-            st.write("### Relação entre Nível de Tempo Livre e Média de Faltas")
-
-            if 'freetime' in data.columns and 'absences' in data.columns:
-                fig, ax = plt.subplots(figsize=(10, 6))
-
-                # Agrupar dados por tempo livre e calcular média de faltas
-                # Use observed=True to avoid warnings with categorical data in recent pandas
-                freetime_groups = data.groupby('freetime', observed=True)['absences'].agg(['mean', 'median', 'count']).reset_index()
-
-                if not freetime_groups.empty:
-                    # Plotar linha para média e barras para contagem
-                    ax1 = ax
-                    line = ax1.plot(
-                        freetime_groups['freetime'],
-                        freetime_groups['mean'],
-                        'o-',
-                        color='#3366FF',
-                        linewidth=3,
-                        markersize=10,
-                        label='Média de Faltas'
-                    )
-
-                    ax1.set_xlabel('Nível de Tempo Livre (1: muito baixo, 5: muito alto)')
-                    ax1.set_ylabel('Média de Faltas', color='#3366FF')
-                    ax1.tick_params(axis='y', labelcolor='#3366FF')
-                    ax1.set_xticks(freetime_groups['freetime']) # Ensure all unique freetime values are ticks
-
-                    # Adicionar valores nas linhas
-                    for x, y in zip(freetime_groups['freetime'], freetime_groups['mean']):
-                        # Add a small vertical offset to the text
-                        ax1.annotate(f'{y:.1f}', (x, y), xytext=(0, 10),
-                                   textcoords='offset points', ha='center', fontsize=9)
-
-                    # Criar segundo eixo para contagem de estudantes
-                    ax2 = ax1.twinx()
-                    bars = ax2.bar(
-                        freetime_groups['freetime'],
-                        freetime_groups['count'],
-                        alpha=0.5, # More transparency
-                        color='#32CD32',
-                        width=0.6, # Wider bars
-                        label='Número de Estudantes'
-                    )
-
-                    # Adicionar contagem nas barras
-                    for bar in bars:
-                        height = bar.get_height()
-                        # Add a small vertical offset to the text
-                        ax2.text(
-                            bar.get_x() + bar.get_width()/2,
-                            height,
-                            f'{int(height)}',
-                            ha='center',
-                            va='bottom',
-                            fontsize=9
-                        )
-
-                    ax2.set_ylabel('Número de Estudantes', color='#32CD32')
-                    ax2.tick_params(axis='y', labelcolor='#32CD32')
-
-                    # Combinar legendas dos dois eixos
-                    lines1, labels1 = ax1.get_legend_handles_labels()
-                    lines2, labels2 = ax2.get_legend_handles_labels()
-                    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-
-                    ax1.set_title('Relação entre Nível de Tempo Livre e Faltas')
-                    ax1.grid(axis='y', linestyle='--', alpha=0.7) # Grid only on y-axis
-
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    plt.close(fig)
-
-                    st.markdown("""
-                    **Conclusões sobre 'freetime' vs 'absences' (com base na tua análise):**
-                    1.  **Menos tempo livre associado a mais faltas:** Alunos com nível 1 de tempo livre têm, em média, mais faltas.
-                    2.  **Relação não linear:** A partir do nível 3, o número de faltas estabiliza, com leve aumento nos níveis 4 e 5.
-                    3.  **Distribuição de alunos:** A maioria dos alunos reporta níveis médios de tempo livre (3-4).
-                    """)
-                else:
-                    st.info("Dados insuficientes nos grupos de 'freetime' para gerar este gráfico.")
-            else:
-                 st.info("Colunas 'freetime' ou 'absences' não encontradas para esta visualização.")
-
-
-elif page == "🔍 Pré-processamento":
-    st.markdown('<h1 class="main-header">Processamento de Dados</h1>', unsafe_allow_html=True)
-    st.write("As etapas de pré-processamento foram aplicadas para preparar os dados para os modelos de Machine Learning.")
-
-    st.markdown('<h2 class="sub-header">Pipeline de Pré-processamento</h2>', unsafe_allow_html=True)
-
-    # Use HTML and CSS for a simple flow diagram
-    st.markdown("""
-    <div style="display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap;">
-
-        <div style="text-align:center; padding: 1rem; background-color: #e0f7fa; border-radius: 5px; height: 150px; display: flex; flex-direction: column; justify-content: center; width: 200px;">
-            <h4>1. Dados Brutos</h4>
-            <p style="font-size: 0.9rem;">• Dataset Original</p>
-            <p style="font-size: 0.9rem;">• Valores Categóricos/Numéricos</p>
-            <p style="font-size: 0.9rem;">• Variável Target ('passed')</p>
-        </div>
-
-        <div style="font-size: 2rem; margin: 0 10px;">&rarr;</div>
-
-        <div style="text-align:center; padding: 1rem; background-color: #fff3e0; border-radius: 5px; height: 150px; display: flex; flex-direction: column; justify-content: center; width: 200px;">
-            <h4>2. Target Mapping</h4>
-            <p style="font-size: 0.9rem;">• 'yes' &rarr; 1</p>
-            <p style="font-size: 0.9rem;">• 'no' &rarr; 0</p>
-            <p style="font-size: 0.9rem;">• Nova coluna 'passed_mapped'</p>
-        </div>
-
-         <div style="font-size: 2rem; margin: 0 10px;">&rarr;</div>
-
-        <div style="text-align:center; padding: 1rem; background-color: #e8f5e9; border-radius: 5px; height: 150px; display: flex; flex-direction: column; justify-content: center; width: 200px;">
-            <h4>3. Split Treino/Teste</h4>
-            <p style="font-size: 0.9rem;">• Dados divididos ({:.0f}% Teste)</p>
-            <p style="font-size: 0.9rem;">• Separação X (features) e y (target)</p>
-            <p style="font-size: 0.9rem;">• Estratificado (mantém proporção do target)</p>
-        </div>
-
-        <div style="font-size: 2rem; margin: 10px 0;">&darr;</div> <!-- Vertical arrow below the last box -->
-
-    </div>
-
-     <div style="display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; margin-top: 0px;"> /* New row, centered */
-
-        <div style="font-size: 2rem; margin: 0 10px;">&rarr;</div>
-
-        <div style="text-align:center; padding: 1rem; background-color: #e3f2fd; border-radius: 5px; height: 150px; display: flex; flex-direction: column; justify-content: center; width: 200px;">
-            <h4>5. Dados Processados</h4>
-            <p style="font-size: 0.9rem;">• Numéricos Escalados</p>
-            <p style="font-size: 0.9rem;">• Categóricos One-Hot Encoded</p>
-            <p style="font-size: 0.9rem;">• Prontos para Modelagem</p>
-        </div>
-
-         <div style="font-size: 2rem; margin: 0 10px;">&larr;</div> /* Arrow back */
-
-
-        <div style="text-align:center; padding: 1rem; background-color: #fce4ec; border-radius: 5px; height: 150px; display: flex; flex-direction: column; justify-content: center; width: 200px;">
-            <h4>4. ColumnTransformer</h4>
-            <p style="font-size: 0.9rem;">• **Numéricos:** MinMaxScaler</p>
-            <p style="font-size: 0.9rem;">• **Categóricos:** OneHotEncoder</p>
-            <p style="font-size: 0.9rem;">• Fit no Treino, Transform no Teste/Novos Dados</p>
-        </div>
-
-
-    </div>
-
-    """.format(TEST_SIZE*100), unsafe_allow_html=True)
-
-
-    st.subheader("Etapas Detalhadas")
-    st.markdown("""
-    1.  **Carregamento e Target Mapping:** O ficheiro CSV é carregado. A coluna 'passed' (string: 'yes'/'no') é convertida para uma coluna numérica ('passed_mapped': 1/0) que os modelos podem utilizar.
-    2.  **Separação de Features e Target:** As colunas de input (features, X) são separadas da coluna alvo (target, y). As colunas 'passed' e 'passed_mapped' são removidas das features.
-    3.  **Divisão Treino/Teste:** O dataset é dividido aleatoriamente em conjuntos de treino e teste, com {:.0f}% dos dados reservados para teste (valor definido no código). A divisão é estratificada para garantir que a distribuição da variável alvo fosse semelhante em ambos os conjuntos.
-    4.  **ColumnTransformer:** É configurado um `ColumnTransformer` para aplicar transformações específicas a colunas de diferentes tipos:
-        *   Colunas numéricas (e.g., idade, faltas) são escalonadas usando `MinMaxScaler`. Isto coloca os valores numa escala entre 0 e 1, o que é importante para modelos sensíveis à magnitude dos features (como SVM e KNN).
-        *   Colunas categóricas (e.g., escola, sexo, emprego dos pais) são convertidas em representações numéricas binárias usando `OneHotEncoder`. Para colunas com apenas duas categorias (binárias), `drop='if_binary'` remove uma das colunas resultantes para evitar multicolinearidade.
-    5.  **Aplicação das Transformações:** O `ColumnTransformer` é primeiro ajustado (fit) apenas nos dados de treino para aprender os parâmetros de escalonamento (min/max) e as categorias únicas para o one-hot encoding. Depois, é usado para transformar (transform) tanto os dados de treino quanto os dados de teste. **É crucial usar apenas `transform` nos dados de teste para evitar data leakage.**
-    """.format(TEST_SIZE*100))
-
-    st.subheader("Exemplo de Dados Processados")
-    st.write("Após o pré-processamento, os dados de input são representados por um array numérico de alta dimensionalidade.")
-
-    # Tentar carregar um snippet dos dados processados se existirem os ficheiros
-    try:
-        # Assumindo que guardaste os processed dataframes em CSV
-        # ATENÇÃO: Verifica o nome correto do ficheiro que guardaste no teu notebook
-        processed_train_path = 'data/processed/train_processed.csv' # OU 'data/processed/train_student_data_processed_final_v2.csv' se usaste esse nome
-        if os.path.exists(processed_train_path):
-             train_df_processed_example = pd.read_csv(processed_train_path)
-             st.dataframe(train_df_processed_example.head(), use_container_width=True)
-             st.write(f"Shape dos dados de treino processados: {train_df_processed_example.shape}")
-             st.write(f"O número de colunas aumentou de {len(original_input_columns)} para {train_df_processed_example.shape[1]-1} devido ao One-Hot Encoding e exclusão do target.") # -1 para excluir a coluna alvo
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        if 'original_cols' in locals() and original_cols is not None:
+             st.metric("Características Originais", f"{len(original_cols)}")
         else:
-             st.warning(f"Ficheiro CSV com dados de treino processados não encontrado ('{processed_train_path}'). Não é possível mostrar um exemplo.")
+             st.metric("Características Originais", "N/A")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    except Exception as e:
-        st.error(f"Erro ao carregar dados de treino processados para exemplo: {e}")
+    # Status do carregamento do modelo/preprocessor
+    with col3:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        # A verificação de sucesso já foi feita no início, se chegamos aqui, carregou.
+        st.metric("Status do Pipeline", "Carregado ✅")
+        st.markdown('</div>', unsafe_allow_html=True)
 
+    st.markdown('<h2 class="sub-header">Funcionalidades:</h2>', unsafe_allow_html=True)
 
-elif page == "🧠 Modelos e Avaliação":
-    st.markdown('<h1 class="main-header">Modelagem e Avaliação</h1>', unsafe_allow_html=True)
-    st.write("Nesta secção, explorámos diferentes algoritmos de classificação para prever o sucesso dos estudantes.")
-
-    st.subheader("Modelos Experimentados")
     st.markdown("""
-    Foram avaliados vários modelos comuns para tarefas de classificação:
-    *   Regressão Logística
-    *   K-Nearest Neighbors (KNN)
-    *   Support Vector Machine (SVM)
-    *   Árvore de Decisão
-    *   Random Forest
-    *   Gradient Boosting
-    *   AdaBoost
-    *   *(Menciona XGBoost ou outros se usaste)*
-    """)
-
-    st.subheader("Estratégia de Avaliação")
-    st.markdown("""
-    1.  **Baseline:** Calcular a performance de um modelo simples que prevê sempre a classe maioritária para ter uma referência.
-    2.  **Validação Cruzada (CV):** Avaliar cada modelo com parâmetros padrão usando `StratifiedKFold` no conjunto de treino. Isto fornece uma estimativa mais robusta da performance geral do modelo, reduzindo a dependência de uma única divisão treino/teste. A estratificação é importante devido ao desequilíbrio de classes.
-    3.  **Otimização de Hiperparâmetros:** Para os modelos mais promissores identificados na CV, foi utilizada a técnica `GridSearchCV` para encontrar a melhor combinação de hiperparâmetros que maximiza uma métrica de avaliação relevante (e.g., F1-score, AUC ROC), novamente usando CV no conjunto de treino.
-    4.  **Avaliação Final no Conjunto de Teste:** O melhor modelo (ou modelos) otimizado(s) foi(ram) avaliado(s) no conjunto de teste (dados nunca vistos durante o treino ou otimização) para uma estimativa final e imparcial da performance.
-    """)
-
-    st.subheader("Resultados de Avaliação")
-
-    # --- Nota Importante ---
-    st.warning("""
-    Para mostrar os resultados concretos aqui (métricas, matriz de confusão, curvas ROC),
-    precisas de ter guardado estes resultados (ou os modelos treinados e os dados de teste)
-    quando executaste o teu notebook de modelagem.
-
-    A secção abaixo mostra como **apresentar** estes resultados assumindo que os tens disponíveis.
-    Por favor, adapta o código para carregar ou recalcular as métricas/gráficos com base nos teus artefactos salvos.
-    """)
-    # --- Fim Nota Importante ---
-
-    # Exemplo de como mostrar métricas (precisa de carregar os resultados reais)
-    st.markdown("### Métricas Chave no Conjunto de Teste")
-    # Cria um dataframe dummy para demonstração se não houver artefactos
-    if model is not None:
-        # Idealmente, carregarias um dataframe com as métricas finais de um ficheiro
-        # Ex: final_metrics_df = pd.read_csv('artefacts/final_metrics.csv')
-        # st.dataframe(final_metrics_df, use_container_width=True)
-        st.info("Adapta esta secção para carregar e mostrar o dataframe com as métricas de avaliação final dos modelos.")
-
-        # Exemplo de como mostrar métricas apenas do modelo carregado
-        st.markdown(f"#### Métricas para o modelo carregado ({model.__class__.__name__}) no conjunto de teste:")
-        try:
-             # Recalcular métricas para o modelo carregado nos dados de teste processados
-             test_df_processed_for_metrics = pd.read_csv('data/processed/test_processed.csv') # Ajusta o nome
-             y_test_app_metrics = test_df_processed_for_metrics['passed_mapped']
-             X_test_app_metrics_processed = test_df_processed_for_metrics.drop(columns=['passed_mapped'])
-             X_test_app_metrics_processed = X_test_app_metrics_processed[processed_feature_names] # Re-order
-
-             y_pred_test_app_metrics = model.predict(X_test_app_metrics_processed)
-
-             metrics = {
-                'Acurácia': accuracy_score(y_test_app_metrics, y_pred_test_app_metrics),
-                'Precisão': precision_score(y_test_app_metrics, y_pred_test_app_metrics, zero_division=0),
-                'Recall': recall_score(y_test_app_metrics, y_pred_test_app_metrics, zero_division=0),
-                'F1-Score': f1_score(y_test_app_metrics, y_pred_test_app_metrics, zero_division=0)
-             }
-             if hasattr(model, 'predict_proba'):
-                  y_proba_test_app_metrics = model.predict_proba(X_test_app_metrics_processed)[:, 1]
-                  metrics['AUC ROC'] = roc_auc_score(y_test_app_metrics, y_proba_test_app_metrics)
-
-             st.dataframe(pd.DataFrame([metrics]).round(4).T, use_container_width=True)
-
-        except FileNotFoundError:
-             st.warning("Ficheiro CSV com dados de teste processados não encontrado ('data/processed/test_processed.csv'). Não é possível calcular métricas.")
-        except Exception as e:
-             st.error(f"Erro ao calcular métricas para o modelo carregado: {e}")
-
-
-    st.markdown("### Matriz de Confusão do Melhor Modelo")
-    st.write(f"A matriz de confusão para o modelo **{model.__class__.__name__ if model else 'N/A'}** no conjunto de teste:")
-
-    if model is not None and data is not None and preprocessor is not None and processed_feature_names is not None:
-         try:
-              # Recalcular a matriz de confusão para o modelo carregado nos dados de teste processados
-              test_df_processed_for_cm = pd.read_csv('data/processed/test_processed.csv') # Ajusta o nome do teu ficheiro
-              y_test_app_cm = test_df_processed_for_cm['passed_mapped']
-              X_test_app_cm_processed = test_df_processed_for_cm.drop(columns=['passed_mapped'])
-              X_test_app_cm_processed = X_test_app_cm_processed[processed_feature_names] # Re-order columns
-
-              y_pred_test_app_cm = model.predict(X_test_app_cm_processed)
-
-              cm_app_cm = confusion_matrix(y_test_app_cm, y_pred_test_app_cm)
-              disp_app_cm = ConfusionMatrixDisplay(confusion_matrix=cm_app_cm, display_labels=['Não Passou (0)', 'Passou (1)'])
-              fig_cm, ax_cm = plt.subplots(figsize=(6, 6))
-              disp_app_cm.plot(ax=ax_cm, cmap='Blues', values_format='d')
-              ax_cm.set_title('Matriz de Confusão (Teste)')
-              st.pyplot(fig_cm)
-              plt.close(fig_cm)
-
-         except FileNotFoundError:
-              st.warning("Ficheiro CSV com dados de teste processados não encontrado ('data/processed/test_processed.csv'). Não é possível mostrar a matriz de confusão.")
-         except KeyError:
-              st.warning("Coluna 'passed_mapped' não encontrada no ficheiro de teste processado.")
-         except Exception as e:
-              st.error(f"Erro ao calcular/mostrar matriz de confusão: {e}")
-    else:
-         st.warning("Modelo, pré-processador ou dados de teste processados não foram carregados corretamente. Matriz de confusão indisponível.")
-
-
-    st.markdown("### Curva ROC (Receiver Operating Characteristic)")
-    st.write("A curva ROC mostra o tradeoff entre a taxa de verdadeiros positivos (TPR) e a taxa de falsos positivos (FPR) para diferentes thresholds de classificação.")
-
-    if model is not None and data is not None and preprocessor is not None and processed_feature_names is not None:
-         try:
-              # Recalcular ou carregar dados de teste processados e y_test_num para plotar a curva ROC
-              test_df_processed_for_roc = pd.read_csv('data/processed/test_processed.csv') # Ajusta o nome do teu ficheiro
-              y_test_app_roc = test_df_processed_for_roc['passed_mapped']
-              X_test_app_roc_processed = test_df_processed_for_roc.drop(columns=['passed_mapped'])
-              X_test_app_roc_processed = X_test_app_roc_processed[processed_feature_names] # Re-order columns
-
-              # Precisamos das probabilidades para a curva ROC
-              if hasattr(model, "predict_proba"):
-                   y_proba_test_app_roc = model.predict_proba(X_test_app_roc_processed)[:, 1] # Probabilidade da classe positiva (1)
-
-                   fpr, tpr, _ = roc_curve(y_test_app_roc, y_proba_test_app_roc)
-                   roc_auc = auc(fpr, tpr)
-
-                   fig_roc, ax_roc = plt.subplots(figsize=(8, 8))
-                   ax_roc.plot(fpr, tpr, color='darkorange', lw=2, label=f'{model.__class__.__name__} (AUC = {roc_auc:.2f})')
-                   ax_roc.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Aleatório (AUC = 0.50)')
-                   ax_roc.set_xlabel('Taxa de Falsos Positivos (FPR)')
-                   ax_roc.set_ylabel('Taxa de Verdadeiros Positivos (TPR)')
-                   ax_roc.set_title('Curva ROC (Teste)')
-                   ax_roc.legend(loc="lower right")
-                   ax_roc.grid(True)
-                   st.pyplot(fig_roc)
-                   plt.close(fig_roc)
-
-              else:
-                   st.warning(f"O modelo {model.__class__.__name__} não suporta `predict_proba` (necessário para a curva ROC).")
-
-         except FileNotFoundError:
-              st.warning("Ficheiro CSV com dados de teste processados não encontrado ('data/processed/test_processed.csv'). Não é possível mostrar a curva ROC.")
-         except KeyError:
-              st.warning("Coluna 'passed_mapped' não encontrada no ficheiro de teste processado.")
-         except Exception as e:
-              st.error(f"Erro ao calcular/mostrar curva ROC: {e}")
-    else:
-         st.warning("Modelo, pré-processador ou dados de teste processados não foram carregados corretamente. Curva ROC indisponível.")
-
-
-    st.markdown("### Importância das Features")
-    st.write("Análise de quais características foram mais relevantes para a decisão do modelo (se aplicável ao modelo carregado).")
-
-    if model is not None and processed_feature_names is not None:
-         try:
-              # Verificar se o modelo tem feature_importances_ (para modelos baseados em árvore)
-              if hasattr(model, 'feature_importances_'):
-                   importances = model.feature_importances_
-                   feature_imp_df = pd.DataFrame({'Feature': processed_feature_names, 'Importance': importances})
-                   feature_imp_df = feature_imp_df.sort_values('Importance', ascending=False).head(20) # Mostrar top 20
-
-                   st.write("Top 20 Features Mais Importantes:")
-                   fig_fi, ax_fi = plt.subplots(figsize=(10, 8))
-                   sns.barplot(x='Importance', y='Feature', data=feature_imp_df, ax=ax_fi, palette='viridis')
-                   ax_fi.set_title(f'Importância das Features ({model.__class__.__name__})')
-                   ax_fi.set_xlabel('Importância')
-                   ax_fi.set_ylabel('Feature Processada') # Label shows processed names
-                   plt.tight_layout()
-                   st.pyplot(fig_fi)
-                   plt.close(fig_fi)
-
-              # Verificar se o modelo tem coef_ (para modelos lineares)
-              elif hasattr(model, 'coef_'):
-                   # Need to handle multi-class coef_ if applicable, but yours is binary
-                   coefs = model.coef_[0] # Assume classification binária, pega os coeficientes para a classe 1
-                   feature_coef_df = pd.DataFrame({'Feature': processed_feature_names, 'Coefficient': coefs})
-                   # Sort by absolute value to see features with strong impact in either direction
-                   feature_coef_df = feature_coef_df.reindex(feature_coef_df['Coefficient'].abs().sort_values(ascending=False).index).head(20) # Sort by absolute value, show top 20
-
-                   st.write("Top 20 Features Mais Relevantes (Coeficientes Absolutos):")
-                   fig_fc, ax_fc = plt.subplots(figsize=(10, 8))
-                   sns.barplot(x='Coefficient', y='Feature', data=feature_coef_df, ax=ax_fc, palette='coolwarm') # Use diverging palette
-                   ax_fc.set_title(f'Coeficientes das Features ({model.__class__.__name__})')
-                   ax_fc.set_xlabel('Coeficiente')
-                   ax_fc.set_ylabel('Feature Processada') # Label shows processed names
-                   plt.tight_layout()
-                   st.pyplot(fig_fc)
-                   plt.close(fig_fc)
-
-              else:
-                   st.info(f"O modelo {model.__class__.__name__} não fornece importância ou coeficientes de feature de forma padrão.")
-
-         except Exception as e:
-              st.error(f"Erro ao mostrar importância das features: {e}")
-    else:
-         st.warning("Modelo ou nomes das features processadas não carregados corretamente. Importância das Features indisponível.")
-
-
-    st.markdown("### Interpretação e Conclusões")
-    st.markdown("""
-    Com base nas métricas e visualizações de avaliação:
-    *   **Melhor Modelo:** *(Adapta esta parte para nomear o modelo que teve melhor performance no teu teste, por exemplo: "O modelo Random Forest Otimizado obteve o melhor F1-score e AUC ROC...")*
-    *   **Performance Geral:** *(Comenta se a performance é boa o suficiente para o problema. Compara com a baseline. Ex: "O modelo final demonstra uma melhoria significativa sobre a baseline, indicando que as features e o algoritmo capturam padrões relevantes.")*
-    *   **Análise da Matriz de Confusão:** *(Discute os erros. Olhando para a Matriz de Confusão acima, identifica quantos VP, VN, FP, FN o modelo teve no teste. Ex: "Observando a matriz de confusão, o modelo identificou corretamente X alunos que Passaram (Verdadeiros Positivos) e Y alunos que Não Passaram (Verdadeiros Negativos). No entanto, classificou incorretamente Z alunos que Não Passaram como Passaram (Falsos Positivos) e W alunos que Passaram como Não Passaram (Falsos Negativos).")*
-        *   **Falsos Positivos (Não Passou classificado como Passou):** Este é um erro crítico, pois leva a não intervir num aluno que precisaria. *Comenta a taxa de FPs.*
-        *   **Falsos Negativos (Passou classificado como Não Passou):** Este erro leva a uma intervenção desnecessária, o que é menos crítico, mas ineficiente. *Comenta a taxa de FNs.*
-        *   **Trade-off:** Dependendo do custo de cada tipo de erro, pode ser necessário ajustar o threshold de previsão para minimizar o erro mais custoso.
-    *   **Importância das Features:** *(Se mostraste as features mais importantes, discute-as. Ex: "As features mais importantes para o modelo incluem [Lista features]. Isto alinha-se com a intuição de que [explica porquê faz sentido].")*
-    *   **Limitações e Próximos Passos:** *(Menciona desafios e o que faria a seguir. Ex: "O desequilíbrio de classes pode ter afetado alguns modelos. Técnicas de reamostragem como SMOTE poderiam ser exploradas. Coletar mais dados, especialmente de alunos em risco, seria benéfico. Explorar a explicabilidade do modelo com ferramentas como SHAP ou LIME seria importante para entender melhor as decisões e ganhar confiança.")*
+    *   **Exploração de Dados:** Visualize resumos, distribuições e correlações do dataset original.
+    *   **Previsão Individual:** Insira dados de um aluno e obtenha uma previsão do seu desempenho final usando o modelo treinado.
+    *   **Análise do Modelo Treinado:** Veja as métricas de avaliação e a matriz de confusão do modelo carregado no conjunto de teste.
+    *   **Análise de Matriz:** Explore visualmente e analiticamente propriedades de matrizes relevantes (Confusão de *qualquer* modelo, Correlação/Covariância dos seus dados, Matriz Personalizada). # Ajustado texto
+    *   **Documentação:** Encontre mais informações sobre a aplicação e o projeto.
     """)
 
 
-elif page == "🔮 Previsão":
-    st.markdown('<h1 class="main-header">Previsão para um Novo Estudante</h1>', unsafe_allow_html=True)
-    st.write("Insere as características de um estudante para obter uma previsão sobre o seu sucesso académico (Passar/Não Passar).")
+# --- Exploração de Dados (Adaptado para o seu dataset) ---
+elif menu == "Exploração de Dados":
+    st.markdown('<h1 class="main-header">Exploração do Dataset Estudantil</h1>', unsafe_allow_html=True)
 
-    if model is None or preprocessor is None or data is None or not original_input_columns:
-         st.warning("Não foi possível carregar o modelo, pré-processador ou dados originais. A secção de previsão está indisponível.")
-         if data is not None and not original_input_columns:
-              st.warning("A lista de colunas de input originais está vazia. Verifica o carregamento dos dados.")
-         # No need to st.stop() here, just show the warning and the section below won't execute the prediction part
-    else: # Only proceed if all necessary components are loaded
-        st.subheader("Introduzir Dados do Estudante")
-        st.write("Por favor, preenche os campos abaixo com os dados do estudante:")
+    df = student_df_original.copy()
 
-        # Obter as estatísticas descritivas para definir ranges/valores padrão nos inputs numéricos
-        # Ensure num_stats is calculated only if data is available and has numerical columns
-        num_cols_for_stats = data[original_input_columns].select_dtypes(include=np.number).columns.tolist()
-        num_stats = data[num_cols_for_stats].describe().T if num_cols_for_stats else pd.DataFrame() # Empty dataframe if no numeric cols
+    st.markdown('<p class="info-text">Analise a estrutura, distribuição e relações entre as características do seu dataset de dados estudantis (`student-data.csv`).</p>', unsafe_allow_html=True)
 
-        # Dicionário para armazenar os inputs do utilizador
-        user_inputs = {}
+    tab1, tab2, tab3 = st.tabs(["📋 Resumo Geral", "📈 Distribuições", "🔍 Relações"])
 
-        # Exibir inputs em colunas para um layout mais compacto
-        num_cols_per_row = 3
-        cols = st.columns(num_cols_per_row)
-        col_idx = 0
+    with tab1:
+        st.markdown('<h2 class="sub-header">Resumo Geral do Dataset</h2>', unsafe_allow_html=True)
 
-        # Organizar inputs por tipo (numérico vs categórico) para melhor apresentação
-        numeric_input_cols = [col for col in original_input_columns if data[col].dtype in [np.number, 'int64', 'float64']] # Use numpy dtypes check
-        nominal_input_cols = [col for col in original_input_columns if data[col].dtype == 'object']
+        col1, col2 = st.columns(2)
 
-        # Criar inputs para colunas nominais (Selectbox com opções únicas)
-        st.markdown("#### Características Categóricas")
-        cols = st.columns(num_cols_per_row)
-        col_idx = 0
-        for col in nominal_input_cols:
-            options = data[col].unique().tolist()
-            # Handle potential NaN in options if they exist in original data
-            options = [opt for opt in options if pd.notna(opt)]
-            with cols[col_idx]:
-                 user_inputs[col] = st.selectbox(f"{col}", options)
-            col_idx = (col_idx + 1) % num_cols_per_row
+        with col1:
+            st.write("**Dimensões do Dataset:**", df.shape)
+            if 'original_cols' in locals() and original_cols is not None:
+                 st.write(f"**Características (Features):** {len(original_cols)}")
+            else:
+                 st.warning("Nomes das características originais não carregados.")
+                 st.write(f"**Características (Features):** {df.shape[1] - (1 if TARGET_ORIGINAL_NAME in df.columns else 0)}")
 
-        # Quebra de linha para nova secção visualmente (ensure column layout is respected)
-        if col_idx != 0:
-             # Fill the remaining columns with empty space if the last row is not full
-             for i in range(num_cols_per_row - col_idx):
-                  with cols[col_idx + i]:
-                       st.write("") # Add empty space to fill the row
-        st.markdown("---") # Horizontal rule
+            st.write(f"**Amostras:** {df.shape[0]}")
 
-        # Criar inputs para colunas numéricas (Number Input ou Slider com min/max do dataset)
-        st.markdown("#### Características Numéricas")
-        cols = st.columns(num_cols_per_row)
-        col_idx = 0
-        for col in numeric_input_cols:
-             if col in num_stats.index: # Check if stats are available for this column
-                 min_val = float(num_stats.loc[col, 'min'])
-                 max_val = float(num_stats.loc[col, 'max'])
-                 mean_val = float(num_stats.loc[col, 'mean']) # Usar média como valor default ou um valor razoável
+            if TARGET_ORIGINAL_NAME in df.columns:
+                 st.write(f"**Variável Alvo:** '{TARGET_ORIGINAL_NAME}'")
+                 unique_target_values = df[TARGET_ORIGINAL_NAME].unique().tolist()
+                 st.write(f"**Classes:** {', '.join(map(str, unique_target_values))}")
 
-                 with cols[col_idx]:
-                     # Use number_input or slider depending on the scale/type (int/float)
-                     # Adjust step based on data type
-                     step_val = 1 if data[col].dtype == np.int64 else 0.01 # Assuming floats exist
-                     user_inputs[col] = st.number_input(f"{col}",
-                                                       min_value=min_val,
-                                                       max_value=max_val,
-                                                       value=mean_val, # Default to mean
-                                                       step=step_val,
-                                                       format="%f" if step_val != 1 else "%d" # Format based on step
-                                                       )
-                 col_idx = (col_idx + 1) % num_cols_per_row
+            st.markdown('---')
+            st.write("**Primeiras 5 Linhas:**")
+            st.dataframe(df.head(), use_container_width=True)
+
+        with col2:
+             if TARGET_ORIGINAL_NAME in df.columns:
+                 st.write(f"**Distribuição da Coluna '{TARGET_ORIGINAL_NAME}':**")
+                 class_counts = df[TARGET_ORIGINAL_NAME].value_counts()
+                 fig_pie = px.pie(
+                     values=class_counts.values,
+                     names=class_counts.index.tolist(),
+                     title=f"Distribuição de '{TARGET_ORIGINAL_NAME}'",
+                     hole=0.3
+                 )
+                 fig_pie.update_layout(legend_title_text=TARGET_ORIGINAL_NAME.replace('_', ' ').title())
+                 st.plotly_chart(fig_pie, use_container_width=True)
              else:
-                 # Handle case where column is in original_input_columns but not in num_stats (shouldn't happen if logic is correct)
-                 st.warning(f"Estatísticas não encontradas para a coluna numérica '{col}'. Ignorando input para esta feature.")
+                  st.info(f"Não é possível mostrar a distribuição da coluna alvo '{TARGET_ORIGINAL_NAME}'.")
+
+        st.markdown('<h2 class="sub-header">Estatísticas Descritivas</h2>', unsafe_allow_html=True)
+        st.dataframe(df.describe(include='all'), use_container_width=True)
+
+    with tab2:
+        st.markdown('<h2 class="sub-header">Distribuição das Características</h2>', unsafe_allow_html=True)
+        st.markdown('<p class="info-text">Visualize a distribuição de cada característica do seu dataset.</p>', unsafe_allow_html=True)
+
+        feature_options_dist = original_cols if 'original_cols' in locals() and original_cols is not None else df.columns.tolist()
+        if TARGET_ORIGINAL_NAME in feature_options_dist:
+             feature_options_dist.remove(TARGET_ORIGINAL_NAME)
+
+        selected_feature_dist = st.selectbox(
+            "Selecione uma característica para visualizar a distribuição:",
+            options=feature_options_dist
+        )
+
+        if selected_feature_dist:
+             dtype = df[selected_feature_dist].dtype
+             if dtype in [np.number, 'int64', 'float64']:
+                  fig_hist = px.histogram(
+                      df,
+                      x=selected_feature_dist,
+                      marginal="box",
+                      title=f'Distribuição de "{selected_feature_dist}"'
+                  )
+                  st.plotly_chart(fig_hist, use_container_width=True)
+             elif dtype == 'object' or pd.api.types.is_categorical_dtype(df[selected_feature_dist]):
+                  counts_df = df[selected_feature_dist].value_counts().reset_index()
+                  counts_df.columns = [selected_feature_dist, 'Count']
+                  fig_bar = px.bar(
+                      counts_df,
+                      x=selected_feature_dist,
+                      y='Count',
+                      title=f'Distribuição de "{selected_feature_dist}"'
+                  )
+                  st.plotly_chart(fig_bar, use_container_width=True)
+             else:
+                 st.info(f"A característica '{selected_feature_dist}' tem um tipo de dado ({dtype}) que não é suportado para visualização de distribuição neste momento.")
+
+    with tab3:
+        st.markdown('<h2 class="sub-header">Relações entre Características</h2>', unsafe_allow_html=True)
+        st.markdown('<p class="info-text">Analise a relação entre pares de características no seu dataset, coloridas pela classe alvo.</p>', unsafe_allow_html=True)
+
+        st.markdown('### Matriz de Correlação', unsafe_allow_html=True)
+        st.markdown('<p class="info-text">Veja a correlação linear entre as características numéricas.</p>', unsafe_allow_html=True)
+
+        df_features_only = df[original_cols] if 'original_cols' in locals() and original_cols is not None else df.drop(columns=[TARGET_ORIGINAL_NAME] if TARGET_ORIGINAL_NAME in df.columns else [])
+        df_numeric_for_corr = df_features_only.select_dtypes(include=np.number)
+
+        if df_numeric_for_corr.empty:
+             st.warning("Não há colunas numéricas entre as características usadas para calcular a matriz de correlação no seu dataset.")
+        else:
+            fig_corr, corr_matrix = plot_correlation_matrix_px(df_numeric_for_corr)
+            if fig_corr:
+                st.plotly_chart(fig_corr, use_container_width=True)
+
+        st.markdown('### Scatter Plot por Situação Final', unsafe_allow_html=True)
+        st.markdown(f'<p class="info-text">Selecione duas características numéricas para visualizar sua relação e como a "{TARGET_ORIGINAL_NAME}" se distribui.</p>', unsafe_allow_html=True)
+
+        numeric_cols_for_scatter_options = df_features_only.select_dtypes(include=np.number).columns.tolist()
+
+        if len(numeric_cols_for_scatter_options) < 2:
+             st.info("São necessárias pelo menos duas características numéricas entre as usadas no seu dataset para o scatter plot.")
+        elif TARGET_ORIGINAL_NAME not in df.columns:
+            st.warning(f"Coluna alvo '{TARGET_ORIGINAL_NAME}' não encontrada no seu dataset para colorir o scatter plot.")
+            col_x, col_y = st.columns(2)
+            with col_x:
+                 feature_x = st.selectbox("Selecione a característica X", numeric_cols_for_scatter_options, index=0, key="scatter_x_no_color")
+            with col_y:
+                 default_y_index = 1 if len(numeric_cols_for_scatter_options) > 1 and numeric_cols_for_scatter_options[0] == feature_x else 0
+                 feature_y = st.selectbox("Selecione a característica Y", [col for col in numeric_cols_for_scatter_options if col != feature_x], index=default_y_index, key="scatter_y_no_color")
+
+            if feature_x and feature_y:
+                fig_scatter = px.scatter(
+                    df,
+                    x=feature_x,
+                    y=feature_y,
+                    title=f"Dispersão: {feature_x} vs {feature_y} (Sem Cor por Classe)",
+                    opacity=0.7,
+                    hover_data=[feature_x, feature_y]
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True)
+
+        else:
+            col_x, col_y = st.columns(2)
+            with col_x:
+                feature_x = st.selectbox("Selecione a característica X", numeric_cols_for_scatter_options, index=0, key="scatter_x_color")
+            with col_y:
+                default_y_index = 1 if len(numeric_cols_for_scatter_options) > 1 and numeric_cols_for_scatter_options[0] == feature_x else 0
+                feature_y = st.selectbox("Selecione a característica Y", [col for col in numeric_cols_for_scatter_options if col != feature_x], index=default_y_index, key="scatter_y_color")
+
+            if feature_x and feature_y:
+                 fig_scatter = px.scatter(
+                     df,
+                     x=feature_x,
+                     y=feature_y,
+                     color=TARGET_ORIGINAL_NAME,
+                     labels={"color": TARGET_ORIGINAL_NAME.replace('_', ' ').title()},
+                     title=f"Dispersão: {feature_x} vs {feature_y} por {TARGET_ORIGINAL_NAME.replace('_', ' ').title()}",
+                     opacity=0.7,
+                     hover_data={TARGET_ORIGINAL_NAME:False, feature_x:True, feature_y:True}
+                 )
+                 fig_scatter.update_layout(legend_title_text=TARGET_ORIGINAL_NAME.replace('_', ' ').title())
+                 st.plotly_chart(fig_scatter, use_container_width=True)
+            else:
+                 st.warning("Selecione características válidas para o scatter plot.")
 
 
-        # Ensure all inputs are collected even if layout uses columns
-        # This dictionary user_inputs should now contain all values
+# --- Nova Secção: Previsão Individual ---
+elif menu == "Previsão Individual":
+    st.markdown('<h1 class="main-header">Sistema de Previsão de Desempenho Estudantil</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="info-text">Insira os dados de um aluno para obter a previsão se ele passará no exame final, usando o modelo treinado.</p>', unsafe_allow_html=True)
 
+    st.info("Certifique-se de inserir os dados com precisão para obter uma previsão mais fiável.")
 
-        st.markdown("---") # Horizontal rule before the button
+    st.markdown('<h2 class="sub-header">Dados do Aluno</h2>', unsafe_allow_html=True)
 
-        # Botão para prever (centralizado)
-        predict_button_col = st.columns(3)[1] # Create 3 columns and use the middle one
-        with predict_button_col:
-            if st.button("✨ Fazer Previsão ✨", use_container_width=True):
-                # Preparar os dados de input para o modelo
-                # Criar um DataFrame com uma única linha a partir dos inputs do utilizador
-                input_df = pd.DataFrame([user_inputs])
+    if 'original_cols' not in locals() or original_cols is None:
+        st.error("Não foi possível carregar os nomes das características originais. A secção de Previsão Individual não está disponível.")
+    else:
+        input_data = {}
 
-                # IMPORTANTE: Assegurar que a ordem das colunas no input_df é a mesma
-                # que a ordem esperada pelo preprocessor treinado.
-                # A lista `processed_feature_names` guarda a ordem APÓS o pre-processamento,
-                # mas o `preprocessor.transform` espera a ordem das colunas ORIGINAIS de input (X).
-                # A lista `original_input_columns` guarda os nomes das colunas X originais.
-                # Usar `original_input_columns` para reordenar o input_df
-                try:
-                     input_df = input_df[original_input_columns] # Re-order columns to match original X
-                     # Ensure dtypes match original data if possible, though preprocessor should handle
-                     # For categorical, objects are fine. For numeric, ensure they are numeric.
-                     for col in input_df.columns:
-                          if col in data.columns:
-                               input_df[col] = input_df[col].astype(data[col].dtype)
+        original_dtypes = student_df_original[original_cols].dtypes
 
-                except KeyError as e:
-                     st.error(f"Erro: A coluna de input '{e}' não foi encontrada no DataFrame criado. Verifica se os nomes das colunas nos inputs correspondem aos dados originais.")
-                     st.stop()
+        numeric_features = [col for col in original_cols if original_dtypes[col] in [np.number, 'int64', 'float64']]
+        categorical_features = [col for col in original_cols if original_dtypes[col] == 'object']
 
+        st.markdown("### Características Numéricas")
+        cols_num = st.columns(4)
+        col_idx = 0
+        for feature in numeric_features:
+            min_val = student_df_original[feature].min()
+            max_val = student_df_original[feature].max()
+            mean_val = student_df_original[feature].mean()
 
-                # Aplicar o preprocessor treinado
-                try:
-                    input_processed = preprocessor.transform(input_df)
-                    # input_processed é agora um numpy array.
-                    # Se o teu modelo foi treinado com um DataFrame (por exemplo, se usaste pipelines com pandas-friendly transformers),
-                    # talvez precises de converter input_processed de volta para DataFrame AQUI,
-                    # usando `processed_feature_names` para os nomes das colunas.
-                    # Ex: input_processed_df = pd.DataFrame(input_processed, columns=processed_feature_names)
-                    # Mas para modelos sklearn padrão (RF, LR, SVM), um array numpy geralmente funciona.
-                    # Vamos assumir que o modelo treinado (`model`) aceita o output numpy do `preprocessor.transform`.
+            with cols_num[col_idx % 4]:
+                input_data[feature] = st.number_input(
+                    f"{feature.replace('_', ' ').title()}",
+                    min_value=float(min_val) if pd.notna(min_val) else 0.0,
+                    max_value=float(max_val) if pd.notna(max_val) else None,
+                    value=float(mean_val) if pd.notna(mean_val) else 0.0,
+                    step=1.0 if original_dtypes[feature] == 'int64' else 0.1,
+                    format="%f" if original_dtypes[feature] == 'float64' else "%d",
+                    key=f"input_{feature}"
+                )
+            col_idx += 1
 
-                except Exception as e:
-                     st.error(f"Erro ao pré-processar o input: {e}")
-                     st.warning("Verifica se todos os inputs foram preenchidos corretamente e se correspondem aos tipos esperados.")
-                     st.stop()
+        st.markdown("### Características Categóricas/Binárias")
+        cols_cat = st.columns(4)
+        col_idx = 0
+        for feature in categorical_features:
+            options = student_df_original[feature].dropna().unique().tolist()
 
+            with cols_cat[col_idx % 4]:
+                 input_data[feature] = st.selectbox(
+                     f"{feature.replace('_', ' ').title()}",
+                     options=options,
+                     index=0,
+                     key=f"input_{feature}"
+                 )
+            col_idx += 1
 
-                # Fazer a previsão com o modelo treinado
-                try:
-                     prediction = model.predict(input_processed)
-                     prediction_proba = model.predict_proba(input_processed)
+        st.markdown("---")
+        if st.button("🚀 Prever Resultado do Aluno"):
+            input_df = pd.DataFrame([input_data], columns=original_cols)
+            st.write("Dados de entrada para previsão:")
+            st.dataframe(input_df, use_container_width=True)
 
-                except Exception as e:
-                     st.error(f"Erro ao fazer a previsão com o modelo: {e}")
-                     st.warning("Verifica se o modelo foi carregado corretamente e se o input processado tem o formato esperado.")
-                     st.stop()
+            loading_animation("Aplicando pré-processamento...")
+            try:
+                input_processed = preprocessor.transform(input_df)
+                st.success("✅ Pré-processamento aplicado.")
 
+                loading_animation("Fazendo previsão...")
+                prediction = model.predict(input_processed)
 
-                # Interpretar e mostrar o resultado
-                st.subheader("Resultado da Previsão")
+                y_proba_input = None
+                if hasattr(model, 'predict_proba'):
+                     y_proba_input = model.predict_proba(input_processed)
 
-                predicted_class = prediction[0] # 0 ou 1
-                # prediction_proba é um array [[prob_classe_0, prob_classe_1]]
-                probability = prediction_proba[0][predicted_class] # Probabilidade da classe prevista
+                predicted_class_index = prediction[0]
+                predicted_class_label = CLASS_NAMES[predicted_class_index]
 
-                if predicted_class == 1:
-                    st.markdown(f'<div class="prediction-card prediction-pass">Previsão: PASSOU</div>', unsafe_allow_html=True)
-                    st.info(f"Probabilidade de passar: **{probability:.2f}**")
+                st.markdown('<h2 class="sub-header">Resultado da Previsão:</h2>', unsafe_allow_html=True)
+
+                if predicted_class_label == 'yes':
+                     st.balloons()
+                     st.success(f"🎉 Previsão: O aluno **PROVAVELMENTE PASSARÁ** no exame final!")
                 else:
-                    st.markdown(f'<div class="prediction-card prediction-fail">Previsão: NÃO PASSOU</div>', unsafe_allow_html=True)
-                    st.info(f"Probabilidade de não passar: **{probability:.2f}**")
+                     st.warning(f"😟 Previsão: O aluno **PROVAVELMENTE NÃO PASSARÁ** no exame final.")
 
-                st.write("---")
-                st.write("Nota: Esta previsão baseia-se no modelo treinado com os dados fornecidos e deve ser interpretada com cuidado.")
+                st.markdown("---")
+                st.markdown("#### Detalhes da Previsão")
+                st.write(f"- Classe Prevista: **{predicted_class_label}**")
+
+                if y_proba_input is not None:
+                     probability_of_yes = y_proba_input[0][CLASS_NAMES.index('yes')]
+                     probability_of_no = y_proba_input[0][CLASS_NAMES.index('no')]
+                     st.write(f"- Probabilidade de Passar ('yes'): **{probability_of_yes:.2f}**")
+                     st.write(f"- Probabilidade de Não Passar ('no'): **{probability_of_no:.2f}**")
+                else:
+                     st.info("Probabilidades não disponíveis para este modelo.")
+
+                st.info("Nota: Esta é uma previsão baseada no modelo treinado...")
+
+            except Exception as e:
+                 st.error(f"❌ Ocorreu um erro ao fazer a previsão: {e}")
+                 st.warning("Verifique se todos os dados de entrada estão corretos...")
 
 
-# --- Footer (Opcional) ---
+# --- Análise do Modelo Treinado (Avaliação do modelo CARREGADO) ---
+elif menu == "Análise do Modelo Treinado":
+    st.markdown('<h1 class="main-header">Análise do Modelo Treinado para Intervenção Estudantil</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="info-text">Aqui pode ver as métricas de avaliação e a matriz de confusão do modelo (`best_model.joblib`) que foi treinado no seu dataset e guardado como artefacto.</p>', unsafe_allow_html=True)
+
+    st.warning("⚠️ Esta secção mostra a performance do modelo PRÉ-TREINADO nos dados de teste processados, não treina um novo modelo.")
+
+    # Verificar se os dados de teste processados foram carregados e se o modelo carregado existe
+    if test_df_processed_global is None:
+        st.warning("Conjunto de teste processado não foi carregado. Esta secção não está disponível. Verifique o caminho do ficheiro 'data/processed/test_processed.csv'.")
+    elif model is None:
+         st.error("Modelo treinado ('best_model.joblib') não foi carregado. Esta secção não está disponível.")
+    elif 'processed_cols' not in locals() or processed_cols is None:
+         st.error("Não foi possível carregar os nomes das características processadas. A secção de Análise do Modelo Treinado não está disponível.")
+    else: # Se chegamos aqui, todos os artefactos e dados de teste processados foram carregados
+        if TARGET_PROCESSED_NAME in test_df_processed_global.columns:
+            X_test_processed = test_df_processed_global.drop(columns=[TARGET_PROCESSED_NAME])
+            y_test_processed = test_df_processed_global[TARGET_PROCESSED_NAME]
+
+            if st.button("Avaliar o Modelo Treinado no Conjunto de Teste"):
+                loading_animation("Avaliando o modelo treinado...")
+                try:
+                    y_pred_loaded_model = model.predict(X_test_processed)
+
+                    y_proba_loaded_model = None
+                    if hasattr(model, 'predict_proba'):
+                        y_proba_loaded_model = model.predict_proba(X_test_processed)
+
+
+                    st.markdown('<h2 class="sub-header">Métricas de Avaliação no Conjunto de Teste</h2>', unsafe_allow_html=True)
+
+                    accuracy = accuracy_score(y_test_processed, y_pred_loaded_model)
+                    report_dict = classification_report(y_test_processed, y_pred_loaded_model,
+                                                        target_names=CLASS_NAMES,
+                                                        output_dict=True, zero_division=0)
+                    report_df = pd.DataFrame(report_dict).transpose()
+
+                    roc_auc = None
+                    if y_proba_loaded_model is not None:
+                         try:
+                              roc_auc = roc_auc_score(y_test_processed, y_proba_loaded_model[:, 1])
+                         except Exception as auc_e:
+                              st.warning(f"Não foi possível calcular AUC ROC: {auc_e}. O modelo pode não ter predict_proba válido ou apenas uma classe está presente nos dados de teste.")
+
+
+                    col_metrics1, col_metrics2 = st.columns(2)
+
+                    with col_metrics1:
+                        st.markdown("#### Relatório de Classificação")
+                        st.dataframe(report_df.round(2), use_container_width=True)
+
+                        st.markdown("#### Métricas Resumo")
+                        col_met1, col_met2, col_met3, col_met4 = st.columns(4)
+                        with col_met1: st.metric("Acurácia", f"{accuracy:.2f}")
+                        with col_met2:
+                             if 'weighted avg' in report_df.index:
+                                 st.metric("Precisão (Avg)", f"{report_df.loc['weighted avg', 'precision']:.2f}")
+                             else: st.info("N/A")
+                        with col_met3:
+                            if 'weighted avg' in report_df.index:
+                                st.metric("Recall (Avg)", f"{report_df.loc['weighted avg', 'recall']:.2f}")
+                            else: st.info("N/A")
+                        with col_met4:
+                            if 'weighted avg' in report_df.index:
+                                st.metric("F1-Score (Avg)", f"{report_df.loc['weighted avg', 'f1-score']:.2f}")
+                            else: st.info("N/A")
+                        if roc_auc is not None:
+                             st.metric("AUC ROC", f"{roc_auc:.2f}")
+                        else:
+                             st.info("AUC ROC: N/A")
+
+
+                    with col_metrics2:
+                         fig_cm_loaded_model, cm_matrix_loaded_model = plot_confusion_matrix_interactive(
+                             y_test_processed, y_pred_loaded_model, class_names=CLASS_NAMES
+                         )
+                         st.plotly_chart(fig_cm_loaded_model, use_container_width=True)
+
+                    st.markdown("---")
+                    st.markdown('<h3 class="sub-header">Análise da Matriz (Matriz de Confusão)</h3>', unsafe_allow_html=True)
+                    analyze_square_matrix(cm_matrix_loaded_model, title="Propriedades Matemáticas da CM")
+
+                    if cm_matrix_loaded_model.shape == (2, 2):
+                         tn, fp, fn, tp = cm_matrix_loaded_model.ravel()
+                         st.write(f"**Verdadeiros Positivos (TP):** {tp}")
+                         st.write(f"**Verdadeiros Negativos (TN):** {tn}")
+                         st.write(f"**Falsos Positivos (FP):** {fp}")
+                         st.write(f"**Falsos Negativos (FN):** {fn}")
+                         st.info("""
+                         *   **TP:** Previsto Passou ('yes'), Real Passou ('yes')
+                         *   **TN:** Previsto Não Passou ('no'), Real Não Passou ('no')
+                         *   **FP:** Previsto Passou ('yes'), Real Não Passou ('no') - Intervenção perdida...
+                         *   **FN:** Previsto Não Passou ('no'), Real Passou ('yes') - Intervenção desnecessária...
+                         """)
+                         st.warning("💡 No contexto de intervenção estudantil, Falsos Negativos (FN) são geralmente mais críticos...")
+
+
+                    st.markdown('<h3 class="sub-header">Importância das Características (Modelo Treinado)</h3>', unsafe_allow_html=True)
+                    st.markdown('<p class="info-text">Quais características foram mais relevantes para a decisão do seu modelo treinado, em relação aos dados PÓS pré-processamento.</p>', unsafe_allow_html=True)
+
+                    processed_feature_names_for_plot = processed_cols
+
+                    if hasattr(model, 'feature_importances_'):
+                        feature_importance_df = pd.DataFrame({
+                            'Característica Processada': processed_feature_names_for_plot,
+                            'Importância': model.feature_importances_
+                        }).sort_values('Importância', ascending=False)
+
+                        fig_importance = px.bar(
+                            feature_importance_df.head(min(20, len(feature_importance_df))),
+                            x='Importância',
+                            y='Característica Processada',
+                            orientation='h',
+                            title=f"Importância das Características (Processadas) para o Modelo Treinado"
+                        )
+                        fig_importance.update_layout(yaxis={'categoryorder':'total ascending'})
+                        st.plotly_chart(fig_importance, use_container_width=True)
+                        st.info("A importância mostrada é para as características APÓS o pré-processamento...")
+
+                    elif hasattr(model, 'coef_'):
+                         if model.coef_.ndim == 1:
+                             feature_coef_df = pd.DataFrame({
+                                 'Característica Processada': processed_feature_names_for_plot,
+                                 'Coeficiente': model.coef_[0]
+                             }).sort_values('Coeficiente', ascending=False)
+
+                             coef_min = feature_coef_df['Coeficiente'].min()
+                             coef_max = feature_coef_df['Coeficiente'].max()
+                             abs_max = max(abs(coef_min), abs(coef_max))
+
+                             fig_coef = px.bar(
+                                 feature_coef_df.head(min(20, len(feature_coef_df))),
+                                 x='Coeficiente',
+                                 y='Característica Processada',
+                                 orientation='h',
+                                 color='Coeficiente',
+                                 color_continuous_scale='RdBu',
+                                 range_color=[-abs_max, abs_max],
+                                 title=f"Coeficientes das Características (Processadas) para o Modelo Treinado"
+                             )
+                             fig_coef.update_layout(yaxis={'categoryorder':'total ascending'})
+                             st.plotly_chart(fig_coef, use_container_width=True)
+                             st.info("Coeficientes para características APÓS pré-processamento...")
+
+                         else:
+                              st.info("O modelo treinado tem coeficientes, mas a visualização direta da importância/impacto é complexa para este caso.")
+
+                    else:
+                        st.info("O modelo treinado não fornece importância ou coeficientes de característica de forma padrão...")
+
+                except Exception as e:
+                     st.error(f"❌ Ocorreu um erro ao avaliar o modelo treinado: {e}")
+                     st.warning("Verifique se o conjunto de teste processado corresponde ao formato esperado pelo modelo carregado.")
+
+        elif test_df_processed_global is None:
+             st.warning("Conjunto de teste processado não foi carregado...")
+
+
+# --- Análise de Matriz (Adaptado para incluir seleção de modelo para CM) ---
+elif menu == "Análise de Matriz":
+    st.markdown('<h1 class="main-header">Análise de Matriz</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="info-text">Explore visualmente e analiticamente diferentes tipos de matrizes importantes em Machine Learning, usando os seus dados ou escolhendo um modelo para a Matriz de Confusão.</p>', unsafe_allow_html=True)
+
+    matrix_type = st.selectbox(
+        "Selecione o tipo de matriz para análise",
+        ["Matriz de Confusão (Escolher Modelo)", "Matriz de Correlação (Seu Dataset)", "Matriz de Covariância (Seu Dataset)", "Matriz Personalizada"] # Ajustado nome para CM
+    )
+
+    # Secção Matriz de Confusão (Escolher Modelo)
+    if matrix_type == "Matriz de Confusão (Escolher Modelo)":
+        st.markdown('<h2 class="sub-header">Matriz de Confusão de Modelo Selecionado</h2>', unsafe_allow_html=True)
+        st.markdown('<p class="info-text">Selecione um tipo de modelo para treinar *temporariamente* nos seus dados processados e ver a Matriz de Confusão no conjunto de teste.</p>', unsafe_allow_html=True)
+
+        # Verificar se os dados de treino e teste processados foram carregados
+        if train_df_processed_global is None or test_df_processed_global is None:
+            st.warning("Os conjuntos de treino ou teste processados não foram carregados. Não é possível gerar a Matriz de Confusão. Verifique os ficheiros em 'data/processed/'.")
+        elif 'processed_cols' not in locals() or processed_cols is None:
+            st.error("Não foi possível carregar os nomes das características processadas. A geração da Matriz de Confusão não está disponível.")
+        else: # Se os dados processados e processed_cols foram carregados
+            # Separar X e y dos dataframes processados globais
+            if TARGET_PROCESSED_NAME in train_df_processed_global.columns and TARGET_PROCESSED_NAME in test_df_processed_global.columns:
+                 X_train_processed = train_df_processed_global.drop(columns=[TARGET_PROCESSED_NAME])
+                 y_train_processed = train_df_processed_global[TARGET_PROCESSED_NAME]
+                 X_test_processed = test_df_processed_global.drop(columns=[TARGET_PROCESSED_NAME])
+                 y_test_processed = test_df_processed_global[TARGET_PROCESSED_NAME]
+
+                 # Verificar compatibilidade de colunas processadas
+                 if list(X_train_processed.columns) != list(X_test_processed.columns) or list(X_train_processed.columns) != processed_cols:
+                      st.error("❌ Erro de compatibilidade: As colunas dos dados de treino/teste processados não correspondem aos nomes das features processadas carregadas.")
+                      st.warning("Verifique se os ficheiros em 'data/processed/' foram gerados consistentemente com os artefactos.")
+                 else: # Se os dados são compatíveis
+                    # Seletor de modelo
+                    selected_model_name = st.selectbox(
+                        "Escolha o tipo de modelo para gerar a Matriz de Confusão:",
+                        list(AVAILABLE_MODELS_FOR_ANALYSIS.keys())
+                    )
+
+                    if st.button(f"Gerar Matriz de Confusão para {selected_model_name}"):
+                        loading_animation(f"Treinando {selected_model_name} e gerando Matriz de Confusão...")
+                        try:
+                            # Instanciar o modelo selecionado (com parâmetros padrão definidos em AVAILABLE_MODELS_FOR_ANALYSIS)
+                            model_instance = AVAILABLE_MODELS_FOR_ANALYSIS[selected_model_name]
+
+                            # Treinar o modelo temporariamente nos dados de treino processados
+                            model_instance.fit(X_train_processed, y_train_processed)
+
+                            # Fazer previsões no conjunto de teste processado
+                            y_pred = model_instance.predict(X_test_processed)
+
+                            st.markdown('<h3 class="sub-header">Resultados para o Modelo Selecionado</h3>', unsafe_allow_html=True)
+
+                            # Plotar a Matriz de Confusão
+                            fig_cm, cm_matrix = plot_confusion_matrix_interactive(y_test_processed, y_pred, class_names=CLASS_NAMES)
+
+                            col_cm_viz, col_cm_analysis = st.columns(2)
+
+                            with col_cm_viz:
+                                st.plotly_chart(fig_cm, use_container_width=True)
+
+                            with col_cm_analysis:
+                                st.markdown('<h3 class="sub-header">Análise da Matriz de Confusão</h3>', unsafe_allow_html=True)
+                                st.write(f"Resultados para o modelo **{selected_model_name}** no conjunto de teste processado:")
+
+                                # Análise VP/VN/FP/FN para binário
+                                if cm_matrix.shape == (2, 2):
+                                    tn, fp, fn, tp = cm_matrix.ravel()
+                                    st.write(f"**Verdadeiros Positivos (TP):** {tp}")
+                                    st.write(f"**Verdadeiros Negativos (TN):** {tn}")
+                                    st.write(f"**Falsos Positivos (FP):** {fp}")
+                                    st.write(f"**Falsos Negativos (FN):** {fn}")
+                                    st.info("TP: Previsto Passou, Real Passou | TN: Previsto Não Passou, Real Não Passou | FP: Previsto Passou, Real Não Passou | FN: Previsto Não Passou, Real Passou")
+                                    st.warning("💡 No contexto de intervenção estudantil, Falsos Negativos (FN) são geralmente mais críticos...")
+
+
+                                st.markdown('---')
+                                st.markdown('#### Propriedades da Matriz (CM como matriz genérica)')
+                                analyze_square_matrix(cm_matrix, title="Propriedades Matemáticas da CM")
+
+
+                        except Exception as e:
+                             st.error(f"❌ Ocorreu um erro ao treinar ou avaliar o modelo: {e}")
+                             st.warning("Verifique a compatibilidade entre o modelo e os dados processados.")
+
+                 # else: # Mensagens de erro de compatibilidade já exibidas
+
+            else: # Mensagem para quando os dados não estão prontos ou compatíveis
+                pass # As mensagens de erro ou aviso já foram exibidas acima
+
+            # else: # Mensagens de erro caso as colunas alvo não estejam nos dataframes processados
+            #      if TARGET_PROCESSED_NAME not in train_df_processed_global.columns:
+            #           st.error(f"A coluna alvo '{TARGET_PROCESSED_NAME}' não foi encontrada no dataframe de treino processado.")
+            #      if TARGET_PROCESSED_NAME not in test_df_processed_global.columns:
+            #           st.error(f"A coluna alvo '{TARGET_PROCESSED_NAME}' não foi encontrada no dataframe de teste processado.")
+
+
+    # Secção Matriz de Correlação - usar o dataset original
+    elif matrix_type == "Matriz de Correlação (Seu Dataset)":
+        st.markdown('<h2 class="sub-header">Análise de Matriz de Correlação</h2>', unsafe_allow_html=True)
+        st.markdown('<p class="info-text">Analise a correlação linear entre as características numéricas do seu dataset original (`student-data.csv`).</p>', unsafe_allow_html=True)
+
+        df_features_only = student_df_original[original_cols] if 'original_cols' in locals() and original_cols is not None else student_df_original.drop(columns=[TARGET_ORIGINAL_NAME] if TARGET_ORIGINAL_NAME in student_df_original.columns else [])
+        df_numeric_for_corr = df_features_only.select_dtypes(include=np.number)
+
+        if df_numeric_for_corr.empty:
+             st.warning("Não há colunas numéricas entre as características usadas para calcular a matriz de correlação no seu dataset.")
+        else:
+            fig_corr, corr_matrix = plot_correlation_matrix_px(df_numeric_for_corr)
+            if fig_corr is not None and corr_matrix is not None:
+                col_corr_viz, col_corr_analysis = st.columns(2)
+                with col_corr_viz:
+                    st.plotly_chart(fig_corr, use_container_width=True)
+                with col_corr_analysis:
+                    st.markdown('<h3 class="sub-header">Análise da Matriz de Correlação</h3>', unsafe_allow_html=True)
+                    analyze_square_matrix(corr_matrix.values, title="Propriedades Matemáticas da Matriz de Correlação")
+                    st.markdown('#### Pares com Alta Correlação', unsafe_allow_html=True)
+                    st.markdown('<p class="info-text">Identifica pares de características com forte correlação linear (|r| > 0.7).</p>', unsafe_allow_html=True)
+                    corr_unstacked = corr_matrix.stack().reset_index()
+                    corr_unstacked.columns = ['Feature1', 'Feature2', 'Correlation']
+                    high_corr_pairs = corr_unstacked[
+                        (abs(corr_unstacked['Correlation']) > 0.7) &
+                        (corr_unstacked['Feature1'] != corr_unstacked['Feature2'])
+                    ]
+                    high_corr_pairs = high_corr_pairs.loc[
+                        high_corr_pairs[['Feature1', 'Feature2']].apply(lambda x: tuple(sorted(x)), axis=1).drop_duplicates().index
+                    ]
+                    if not high_corr_pairs.empty:
+                        st.dataframe(high_corr_pairs.round(4))
+                        st.warning("⚠️ Alta correlação entre características...")
+                    else:
+                        st.info("Não foram encontrados pares de características com correlação linear forte...")
+            else:
+                 st.info("Não há dados numéricos suficientes entre as características originais no seu dataset para calcular a matriz de correlação.")
+
+    elif matrix_type == "Matriz de Covariância (Seu Dataset)":
+        st.markdown('<h2 class="sub-header">Análise de Matriz de Covariância</h2>', unsafe_allow_html=True)
+        st.markdown('<p class="info-text">Analise a covariância entre as características numéricas do seu dataset original (`student-data.csv`).</p>', unsafe_allow_html=True)
+
+        df_for_cov = student_df_original[original_cols].select_dtypes(include=np.number)
+
+        if df_for_cov.empty or df_for_cov.shape[1] < 2:
+             st.info("Não há dados numéricos suficientes entre as características originais para calcular a matriz de covariância no seu dataset.")
+        else:
+             cov_matrix = df_for_cov.cov()
+             col_cov_viz, col_cov_analysis = st.columns(2)
+             with col_cov_viz:
+                 fig_cov = plot_square_matrix_heatmap(
+                     cov_matrix.values,
+                     title="Matriz de Covariância",
+                     x_labels=cov_matrix.columns,
+                     y_labels=cov_matrix.columns
+                 )
+                 st.plotly_chart(fig_cov, use_container_width=True)
+             with col_cov_analysis:
+                 st.markdown('<h3 class="sub-header">Análise da Matriz de Covariância</h3>', unsafe_allow_html=True)
+                 analyze_square_matrix(cov_matrix.values, title="Propriedades Matemáticas da Matriz de Covariância")
+                 st.markdown('#### Interpretação da Covariância', unsafe_allow_html=True)
+                 st.info("""
+                 *   **Covariância Positiva:** As duas características tendem a aumentar ou diminuir juntas.
+                 *   **Covariância Negativa:** Uma característica tende a aumentar enquanto a outra diminui.
+                 *   **Covariância Próxima de Zero:** Pouca ou nenhuma relação linear.
+                 A covariância é dependente da escala dos dados. Para uma medida sem escala, veja a Correlação.
+                 Os valores na diagonal são as variâncias de cada característica.
+                 """)
+
+    elif matrix_type == "Matriz Personalizada":
+        st.markdown('<h2 class="sub-header">Análise de Matriz Personalizada</h2>', unsafe_allow_html=True)
+        st.markdown('<p class="info-text">Insira uma matriz quadrada manualmente ou gere uma aleatoriamente para analisar suas propriedades matemáticas.</p>', unsafe_allow_html=True)
+
+        matrix_option = st.radio("Escolha uma opção:", ["Gerar matriz aleatória", "Inserir matriz manualmente"])
+        custom_matrix = None
+
+        if matrix_option == "Gerar matriz aleatória":
+            st.markdown('### Gerar Matriz Aleatória', unsafe_allow_html=True)
+            size_rand = st.slider("Dimensão da matriz", 2, 8, 3)
+            random_type = st.selectbox("Tipo de matriz", ["Aleatória Geral", "Simétrica", "Diagonal", "Triangular Superior"])
+            if st.button("Gerar Matriz Aleatória"):
+                loading_animation("Gerando matriz aleatória...")
+                if random_type == "Aleatória Geral":
+                    custom_matrix = np.random.rand(size_rand, size_rand) * 10 - 5
+                elif random_type == "Simétrica":
+                    temp = np.random.rand(size_rand, size_rand) * 10 - 5
+                    custom_matrix = (temp + temp.T) / 2
+                elif random_type == "Diagonal":
+                    custom_matrix = np.diag(np.random.rand(size_rand) * 10)
+                elif random_type == "Triangular Superior":
+                    custom_matrix = np.triu(np.random.rand(size_rand, size_rand) * 10 - 5)
+
+        else:
+            st.markdown('### Inserir Matriz Manualmente', unsafe_allow_html=True)
+            st.warning("Insira os valores da matriz...")
+            size_manual = st.number_input("Dimensão da matriz", 2, 6, 3, 1)
+            matrix_inputs_str = []
+            st.write(f"Insira {size_manual} linhas, cada uma com {size_manual} números:")
+            for i in range(size_manual):
+                matrix_inputs_str.append(st.text_input(f"Linha {i+1} (valores separados por vírgula ou espaço)", key=f"manual_matrix_row_{i}"))
+
+            if st.button("Analisar Matriz Manual"):
+                loading_animation("Processando matriz manual...")
+                try:
+                    parsed_rows = []
+                    for i, row_str in enumerate(matrix_inputs_str):
+                        values_str_list = [x.strip() for x in row_str.replace(',', ' ').split() if x.strip()]
+                        values = [float(x) for x in values_str_list]
+                        if len(values) != size_manual:
+                            st.error(f"❌ Erro na Linha {i+1}: Esperava {size_manual} números...")
+                            custom_matrix = None
+                            break
+                        parsed_rows.append(values)
+                    if custom_matrix is None and len(parsed_rows) == size_manual:
+                        custom_matrix = np.array(parsed_rows)
+                        st.success("✅ Matriz inserida e processada com sucesso!")
+                except ValueError:
+                    st.error("❌ Erro ao converter valores para números...")
+                    custom_matrix = None
+                except Exception as e:
+                    st.error(f"❌ Ocorreu um erro inesperado ao processar a matriz: {e}")
+                    custom_matrix = None
+
+        if custom_matrix is not None:
+            st.markdown('---')
+            col_cust_viz, col_cust_analysis = st.columns(2)
+            with col_cust_viz:
+                fig_cust = plot_square_matrix_heatmap(custom_matrix, title="Matriz Personalizada")
+                st.plotly_chart(fig_cust, use_container_width=True)
+            with col_cust_analysis:
+                analyze_square_matrix(custom_matrix, title="Análise da Matriz Personalizada")
+
+
+# --- Documentação (Ajustado texto) ---
+elif menu == "Documentação":
+    st.markdown('<h1 class="main-header">Documentação e Exemplos</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="info-text">Bem-vindo à secção de documentação...</p>', unsafe_allow_html=True)
+
+    st.markdown('<h2 class="sub-header">Sobre o Dataset</h2>', unsafe_allow_html=True)
+    st.markdown(f"""
+    A aplicação utiliza o seu dataset original: **`student-data.csv`**. Este dataset contém informações sobre alunos...
+    """)
+
+    st.markdown('<h2 class="sub-header">Sobre o Modelo de Previsão Confiança</h2>', unsafe_allow_html=True) # Ajustado para clarificar
+    st.markdown("""
+    Um modelo de classificação binária foi treinado no dataset `student-data.csv` para prever se um aluno passará ou não...
+    *   O **Pré-processador** (`preprocessor.joblib`)...
+    *   O **Modelo Treinado Principal** (`best_model.joblib`) é o resultado do processo de treino e otimização realizado no seu notebook e é usado para a Previsão Individual e secção de Análise.
+    Pode obter previsões individuais na secção "Previsão Individual" e ver a avaliação detalhada deste modelo principal no conjunto de teste na secção "Análise do Modelo Treinado".
+    """) # Adicionado detalhes sobre o pré-processador e modelo
+
+    st.markdown('<h2 class="sub-header">Sobre a Análise de Matriz</h2>', unsafe_allow_html=True)
+    st.markdown("""
+    A secção "Análise de Matriz" permite visualizar e analisar propriedades matemáticas...
+    *   **Matriz de Confusão (Escolher Modelo):** Permite selecionar diferentes tipos de modelos para visualizar o seu desempenho *temporário* no conjunto de teste processado. Útil para comparar o desempenho de diferentes algoritmos.
+    *   **Matriz de Correlação (Seu Dataset):** Mostra a correlação linear entre pares de variáveis numéricas no seu dataset original.
+    *   **Matriz de Covariância (Seu Dataset):** Semelhante à correlação, mas dependente da escala...
+    *   **Matriz Personalizada:** Permite introduzir qualquer matriz quadrada...
+    """) # Ajustado descrições
+
+    st.markdown('<h2 class="sub-header">Próximos Passos e Melhorias</h2>', unsafe_allow_html=True)
+    st.markdown("""
+    Pode considerar as seguintes melhorias...
+    """)
+
+
+# --- Footer ---
 st.markdown("---")
-st.markdown("Aplicação desenvolvida com Streamlit")
-
-# Adicione plt.close('all') no final para garantir que todas as figuras do matplotlib são fechadas
-# Isso é uma boa prática em Streamlit para evitar memory leaks em algumas versões/ambientes
-plt.close('all')
+st.markdown("© 2025 Sistema de Intervenção Estudantil. Desenvolvido com Streamlit.")
